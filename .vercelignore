@@ -1,5 +1,10 @@
 .git
 node_modules
+.tools
+.vercel
+dist
+.env
+.env.*
 tests
 supabase
 *.md
