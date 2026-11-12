@@ -118,23 +118,26 @@ test('logout limpa sessão mesmo se a rede falhar', async () => {
   await assert.rejects(api.save(dados), /Entre novamente/);
 });
 
-async function appStart(cloud) {
+async function appStart(cloud, { embeddedBase = true } = {}) {
   const appSource = fs.readFileSync(require('node:path').join(__dirname, '../assets/js/app.js'), 'utf8');
   const storage = new Map([
     ['simulador_logado', '1'],
     ['simulador_dados_v1', JSON.stringify({ ...dados, apostilas: [{ titulo: 'Backup local antigo', conteudo: 'local' }] })]
   ]);
   const store = { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) };
-  const app = { innerHTML: '' }, login = {};
+  const app = { innerHTML: '' }, login = {}, scripts = [];
   const context = {
     window: { DADOS_BASE: dados, SimuladorNuvem: { configured: true, ...cloud }, addEventListener() {}, scrollTo() {} },
     document: { getElementById: id => id === 'app' ? app : login },
     location: { hash: '#/resumo' }, localStorage: store, sessionStorage: store,
-    clearInterval() {}, URLSearchParams
+    clearInterval() {}, URLSearchParams, URL
   };
+  if (!embeddedBase) delete context.window.DADOS_BASE;
+  context.document.createElement = () => ({ remove() {} });
+  context.document.head = { appendChild(script) { scripts.push(script.src); context.window.DADOS_BASE = dados; script.onload(); } };
   vm.runInNewContext(appSource.replace(/iniciar\(\);\s*\}\)\(\);\s*$/, 'window.ready = iniciar(); window.route = rota; })();'), context);
   await context.window.ready;
-  return { context, app, storage, login };
+  return { context, app, storage, login, scripts };
 }
 test('inicialização usa conteúdo remoto e preserva o backup local antigo', async () => {
   const remote = { ...dados, apostilas: [{ titulo: 'Resumo compartilhado', conteudo: 'nuvem' }] };
@@ -145,7 +148,7 @@ test('inicialização usa conteúdo remoto e preserva o backup local antigo', as
 });
 test('indisponibilidade mantém leitura original e bloqueia painel e edição direta', async () => {
   const { context, app } = await appStart({ load: async () => { throw new Error('Banco indisponível'); } });
-  assert.match(app.innerHTML, /sem sincronização/);
+  assert.match(app.innerHTML, /versão original/);
   for (const hash of ['#/admin', '#/admin/editar/questao/q1']) {
     context.location.hash = hash; context.window.route();
     assert.match(app.innerHTML, /Conexão pendente/);
@@ -157,4 +160,39 @@ test('flag de login local não abre administração conectada ao Supabase', asyn
   context.location.hash = '#/admin'; context.window.route();
   assert.match(app.innerHTML, /name="email"/);
   assert.doesNotMatch(app.innerHTML, /Painel de Administração/);
+});
+
+test('acesso direto /admin exige login sem depender de link público', async () => {
+  const { context, app } = await appStart({ load: async () => dados, isAdmin: async () => false });
+  context.location.hash = ''; context.location.pathname = '/admin'; context.window.route();
+  assert.match(app.innerHTML, /name="email"/);
+  assert.doesNotMatch(app.innerHTML, /Painel de Administração/);
+});
+test('URLs executáveis em apostilas não são transformadas em links', async () => {
+  const { app } = await appStart({ load: async () => ({ ...dados, apostilas: [
+    { titulo: 'Invalido', conteudo: '<script>injetado</script>', pdf: 'javascript:alert(1)' },
+    { titulo: 'Valido', conteudo: 'Resumo', pdf: 'pdfs/apostila.pdf' }
+  ] }), isAdmin: async () => false });
+  assert.doesNotMatch(app.innerHTML, /href="javascript:/);
+  assert.doesNotMatch(app.innerHTML, /<script>injetado/);
+  assert.match(app.innerHTML, /&lt;script&gt;injetado/);
+  assert.match(app.innerHTML, /href="https:\/\/simulador.local\/pdfs\/apostila.pdf"/);
+});
+test('rota malformada não derruba a aplicação', async () => {
+  const { context, app } = await appStart({ load: async () => dados, isAdmin: async () => false });
+  context.location.hash = '#/%zz'; context.window.route();
+  assert.match(app.innerHTML, /Endereço inválido/);
+});
+test('página inicial não expõe navegação admin nem baixa a base duplicada', () => {
+  const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
+  assert.doesNotMatch(html, /href="[^"]*admin/);
+  assert.doesNotMatch(html, /src="[^"]*dados.js/);
+  assert.match(html, /defer src="\/assets\/js\/app.js"/);
+});
+test('base original só é solicitada quando a conexão falha', async () => {
+  const ok = await appStart({ load: async () => dados, isAdmin: async () => false }, { embeddedBase: false });
+  assert.equal(ok.scripts.length, 0);
+  const fallback = await appStart({ load: async () => { throw new Error('offline'); } }, { embeddedBase: false });
+  assert.deepEqual(fallback.scripts, ['/data/dados.js']);
+  assert.match(fallback.app.innerHTML, /versão original/);
 });

@@ -1,5 +1,28 @@
 # Integração do simulador com Supabase
 
+## Segurança e acesso administrativo
+
+- A navegação pública mostra apenas simulados e resumos. Digite
+  `https://simuladordeconcurso.vercel.app/admin` para abrir a área administrativa.
+  O endereço continua exigindo login e autorização no banco. Os antigos links
+  com `#/admin` continuam compatíveis, mas não são exibidos na navegação pública.
+- O modo local não oferece mais administração com uma senha do navegador:
+  a administração exige Supabase Auth e o registro em `simulador_admins`.
+- Cadastros públicos de contas foram desativados no Supabase e novas senhas
+  devem ter pelo menos 8 caracteres. Administradores adicionais devem ser
+  criados pelo painel Supabase e autorizados explicitamente no banco.
+- Os cabeçalhos da Vercel limitam scripts ao próprio domínio, conexões ao
+  site e ao projeto Supabase, bloqueiam incorporação em frames e desativam
+  recursos como câmera, microfone e localização. `/admin` recebe `noindex`
+  e `no-store`. A CSP permite estilos inline usados pelo layout, mas não
+  permite scripts inline ou avaliação de código por texto.
+- Links de PDF com protocolos executáveis são rejeitados. HTML de questões,
+  resumos e formulários continua escapado antes da apresentação.
+- A base original só é baixada quando o Supabase está indisponível, vazio ou
+  quando o administrador restaura o conteúdo. A abertura normal não baixa a
+  mesma coleção duas vezes. As questões administrativas são exibidas em
+  páginas de 30 itens e as seções abrem sob demanda.
+
 O código está configurado para o projeto `snazkbzpxkutprnxpjfu`. A chave
 publishable em `assets/js/config.js` é pública e pode acompanhar o site.
 Nunca substitua por uma chave `service_role`, `sb_secret_` ou senha do banco.

@@ -21,7 +21,20 @@ function gravarStore(k, v, store) { try { store.setItem(k, JSON.stringify(v)); r
 const nuvem = window.SimuladorNuvem;
 const online = !!nuvem?.configured;
 let pronto = !online, admin = false, falhaConexao = '', ocupado = false, publicado = false, rotaPendente = false;
-let DB = online ? clone(window.DADOS_BASE) : lerStore(LS, localStorage) || clone(window.DADOS_BASE);
+const DADOS_VAZIOS = { questoes: [], apostilas: [], disciplinas: [], simulados: [] };
+let DB = online ? clone(DADOS_VAZIOS) : lerStore(LS, localStorage) || clone(window.DADOS_BASE || DADOS_VAZIOS);
+let basePromise;
+function carregarBase() {
+  if (window.DADOS_BASE) return Promise.resolve(clone(window.DADOS_BASE));
+  if (!basePromise) basePromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/data/dados.js';
+    script.onload = () => window.DADOS_BASE ? resolve(clone(window.DADOS_BASE)) : reject(new Error('Conteúdo original indisponível.'));
+    script.onerror = () => { basePromise = null; script.remove(); reject(new Error('Não foi possível carregar o conteúdo original.')); };
+    document.head.appendChild(script);
+  });
+  return basePromise.then(clone);
+}
 ['questoes', 'apostilas', 'disciplinas', 'simulados'].forEach((k) => { if (!Array.isArray(DB[k])) DB[k] = []; });
 async function salvarDB() {
   if (online) { await nuvem.save(DB); publicado = true; }
@@ -70,11 +83,22 @@ const salvarEstado = () => gravarStore(SS, estado, sessionStorage);
 /* ---------- utilitários ---------- */
 const e = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nl2br = (s) => e(s).replace(/\r?\n/g, '<br>');
+function pdfSeguro(value) {
+  if (!value || typeof value !== 'string') return '';
+  try {
+    const parsed = new URL(value.trim(), location.origin || 'https://simulador.local');
+    return ['https:', 'http:'].includes(parsed.protocol) ? parsed.href : '';
+  } catch (_) { return ''; }
+}
 const campoArquivoPdf = () => `<label>Selecionar apostila em PDF <input type="file" name="arquivo_pdf" accept=".pdf,application/pdf" ${online ? '' : 'disabled'}></label>
   <small>${online ? 'PDF de até 20 MB. Ao salvar, o arquivo será enviado e ficará disponível aos visitantes. Se selecionar um arquivo, ele será usado no lugar do link abaixo.' : 'Configure o Supabase para enviar arquivos.'}</small>`;
 async function pdfDoFormulario(f) {
   const file = f.elements.arquivo_pdf?.files[0];
-  if (!file) return f.elements.pdf.value.trim();
+  if (!file) {
+    const valor = f.elements.pdf.value.trim(), seguro = pdfSeguro(valor);
+    if (valor && !seguro) throw new Error('Informe um link HTTP/HTTPS válido ou selecione um PDF.');
+    return seguro;
+  }
   const status = document.getElementById('estado-nuvem');
   if (status) status.textContent = 'Enviando PDF… Aguarde a confirmação.';
   return nuvem.uploadPdf(file);
@@ -148,15 +172,17 @@ function iniciarProva(pool, qtd, nome) {
 let timerId = null;
 function pagina(html) {
   const aviso = falhaConexao && !location.hash.startsWith('#/admin')
-    ? `<p class="aviso" role="alert">${e(falhaConexao)} Exibindo o conteúdo original, sem sincronização. <a href="#/admin">Verificar conexão</a></p>` : '';
+    ? '<p class="aviso" role="alert">Não foi possível atualizar o conteúdo. Exibindo a versão original; tente recarregar a página.</p>' : '';
   $app.innerHTML = aviso + html; window.scrollTo(0, 0);
 }
 function rota() {
   if (!pronto) return pagina('<p class="card" role="status">Conectando ao Supabase…</p>');
   if (ocupado) { rotaPendente = true; return; }
   clearInterval(timerId);
-  const h = location.hash.replace(/^#/, '') || '/';
-  const partes = h.split('?')[0].split('/').filter(Boolean).map(decodeURIComponent);
+  const h = location.hash.replace(/^#/, '') || (/^\/admin(?:\/|$)/.test(location.pathname || '') ? location.pathname : '/');
+  let partes;
+  try { partes = h.split('?')[0].split('/').filter(Boolean).map(decodeURIComponent); }
+  catch (_) { return pagina('<p class="aviso">Endereço inválido.</p>'); }
   const [r, a, b] = partes;
   if (!r) return viewHome();
   if (r === 'prova') return viewProva();
@@ -323,34 +349,16 @@ function viewResumo(cat) {
   ${Object.entries(materias).map(([k, v]) => `<a class="chip ${cn === k ? 'ativo' : ''}" href="#/resumo/${encodeURIComponent(k)}">${e(v)}</a>`).join('')}</div>
   ${ap.map((a) => `<article class="card apostila"><div class="meta">${e(materias[normalizarCat(a.cat)] || a.cat)} · ${e(NIVEIS[a.nivel] || 'Todos os níveis')}</div>
     <h2>${e(a.titulo)}</h2><div class="texto">${nl2br(a.conteudo)}</div>
-    ${a.pdf ? `<p><a class="btn sec" href="${e(a.pdf)}" target="_blank" rel="noopener">Abrir apostila em PDF</a></p>` : ''}</article>`).join('')}
+    ${pdfSeguro(a.pdf) ? `<p><a class="btn sec" href="${e(pdfSeguro(a.pdf))}" target="_blank" rel="noopener noreferrer">Abrir apostila em PDF</a></p>` : ''}</article>`).join('')}
   ${ap.length ? '' : '<p class="aviso">Nenhum resumo cadastrado para essa matéria.</p>'}`);
 }
 
 /* ---------- Admin ---------- */
 const flash = (msg, ok = true) => gravarStore('simulador_flash', [msg, ok], sessionStorage);
 const pegarFlash = () => { const f = lerStore('simulador_flash', sessionStorage); sessionStorage.removeItem('simulador_flash'); return f; };
-async function hash(s) {
-  try { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('simulador:' + s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
-  catch (er) { let h = 5381; for (const c of 'simulador:' + s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return 'x' + h; }
-}
 function viewLogin() {
   if (online) return viewLoginNuvem();
-  const novo = !localStorage.getItem('simulador_admin');
-  pagina(`<h1>${novo ? 'Crie a senha do administrador' : 'Entrar no painel'}</h1><p class="aviso oculto" id="erro"></p>
-  <form class="card estreito" id="f-login"><label>Senha <input type="password" name="senha" required></label>
-  ${novo ? '<label>Repita a senha <input type="password" name="senha2" required></label>' : ''}
-  <button class="btn">${novo ? 'Criar senha e entrar' : 'Entrar'}</button>
-  <p class="sub"><small>Atenção: esta senha só protege a tela do painel neste navegador. Como o site é estático, não é segurança real.</small></p></form>`);
-  document.getElementById('f-login').onsubmit = async (ev) => {
-    ev.preventDefault(); const f = ev.target, s = f.senha.value, er = document.getElementById('erro');
-    const mostrar = (m) => { er.textContent = m; er.classList.remove('oculto'); };
-    if (novo) {
-      if (s.length < 8 || s !== f.senha2.value) return mostrar('Use no mínimo 8 caracteres e repita a mesma senha.');
-      localStorage.setItem('simulador_admin', await hash(s));
-    } else if ((await hash(s)) !== localStorage.getItem('simulador_admin')) return mostrar('Senha incorreta.');
-    sessionStorage.setItem('simulador_logado', '1'); rota();
-  };
+  pagina('<h1>Administração indisponível</h1><p class="aviso">Configure a autenticação do Supabase para acessar esta área.</p>');
 }
 function viewLoginNuvem() {
   pagina(`<h1>Entrar no painel</h1><p class="aviso oculto" id="erro" role="alert"></p>
@@ -359,6 +367,7 @@ function viewLoginNuvem() {
     <button class="btn">Entrar</button><p class="sub">Use a conta de administrador cadastrada no Supabase Authentication.</p></form>`);
   document.getElementById('f-login').onsubmit = async (ev) => {
     ev.preventDefault(); const f = ev.target, btn = f.querySelector('button'), erro = document.getElementById('erro');
+    if (btn.disabled) return;
     btn.disabled = true; erro.classList.add('oculto');
     try { await nuvem.signIn(f.email.value.trim(), f.senha.value); admin = true; rota(); }
     catch (error) { erro.textContent = error.message; erro.classList.remove('oculto'); }
@@ -419,10 +428,15 @@ function viewAdmin(ancora) {
     pagina(`<h1>Conexão pendente</h1><p class="aviso">${e(falhaConexao)}</p><button class="btn" id="reconectar">Tentar novamente</button>`);
     document.getElementById('reconectar').onclick = iniciar; return;
   }
-  if (online ? !admin : !sessionStorage.getItem('simulador_logado')) return viewLogin();
+  if (!online || !admin) return viewLogin();
   const materias = getMaterias(), cont = contarPorCat(), apostilas = ler('apostilas'), simulados = ler('simulados');
-  const filtro = normalizarCat(new URLSearchParams((location.hash.split('?')[1]) || '').get('cat') || '');
+  const parametros = new URLSearchParams((location.hash.split('?')[1]) || '');
+  const filtro = normalizarCat(parametros.get('cat') || '');
   const questoes = ler('questoes').filter((q) => !filtro || normalizarCat(q.cat) === filtro);
+  const paginas = Math.max(1, Math.ceil(questoes.length / 30));
+  const numeroPagina = Math.max(1, Math.min(paginas, parseInt(parametros.get('pagina'), 10) || 1));
+  const questoesPagina = questoes.slice().reverse().slice((numeroPagina - 1) * 30, numeroPagina * 30);
+  const linkPagina = (numero) => '#/admin/lista?cat=' + encodeURIComponent(filtro) + '&pagina=' + numero;
   const fl = pegarFlash();
   const exemplo = '[\n  {\n    "cat": "Informática",\n    "nivel": "medio",\n    "enunciado": "Texto da pergunta...",\n    "opcoes": ["Alternativa A", "Alternativa B", "Alternativa C", "Alternativa D", "Alternativa E"],\n    "correta": "C",\n    "explicacao": "Por que a C está certa..."\n  }\n]';
   const chk = (n) => Object.entries(materias).map(([k, v]) => `<label class="chip"><input type="checkbox" name="${n}" value="${e(k)}"> ${e(v)} <small>${cont[k] || 0}</small></label>`).join('');
@@ -431,14 +445,14 @@ function viewAdmin(ancora) {
   <p class="sub" id="estado-nuvem" role="status">${online ? 'Conectado ao Supabase. As alterações salvas ficam disponíveis para todos os visitantes.' : 'Modo local: as alterações ficam salvas apenas neste navegador.'}</p>
   ${online && !publicado ? '<p class="aviso">O banco ainda está vazio. Publique o conteúdo inicial ou importe seu backup.</p><button class="btn" id="publicar">Publicar conteúdo inicial</button>' : ''}
 
-  <section class="card" id="materias"><h2>1. Matérias (disciplinas)</h2>
+  <details class="card secao" id="materias"><summary><h2>1. Matérias (disciplinas)</h2><span class="seta" aria-hidden="true"></span></summary>
     <form class="linha-op" data-f="nova_disciplina"><input type="text" name="nome" placeholder="Nova matéria. Ex.: Informática, Direitos Humanos" required><button class="btn" type="submit">Cadastrar</button></form>
     <div class="tabela"><table><tr><th>Matéria</th><th>Questões</th><th>Apostilas</th><th></th></tr>
     ${Object.entries(materias).map(([k, v]) => `<tr><td>${e(v)}</td><td><a href="#/admin?cat=${encodeURIComponent(k)}" data-lista="${e(k)}">${cont[k] || 0}</a></td>
       <td>${apostilas.filter((a) => normalizarCat(a.cat) === k).length}</td>
-      <td style="text-align:right">${MATERIAS_PADRAO[k] ? '' : `<button class="btn sec peq" data-del="disciplina" data-id="${e(k)}">Excluir</button>`}</td></tr>`).join('')}</table></div></section>
+      <td style="text-align:right">${MATERIAS_PADRAO[k] ? '' : `<button class="btn sec peq" data-del="disciplina" data-id="${e(k)}">Excluir</button>`}</td></tr>`).join('')}</table></div></details>
 
-  <section class="card" id="simulados"><h2>2. Simulados prontos</h2>
+  <details class="card secao" id="simulados"><summary><h2>2. Simulados prontos</h2><span class="seta" aria-hidden="true"></span></summary>
     <p class="sub">Cria um simulado com nome próprio, que aparece na página inicial com um botão "Iniciar".</p>
     <form data-f="novo_simulado"><label>Nome do simulado <input type="text" name="nome" placeholder="Ex.: Simulado Monitor de Creche, nível médio" required></label>
       <label>Descrição (opcional) <input type="text" name="descricao"></label>
@@ -448,25 +462,25 @@ function viewAdmin(ancora) {
       <button class="btn" type="submit">Criar simulado</button></form>
     ${simulados.length ? `<div class="tabela"><table><tr><th>Simulado</th><th>Matérias</th><th>Qtd</th><th></th></tr>
       ${simulados.map((s) => `<tr><td><b>${e(s.nome)}</b></td><td>${e((s.cats || []).map((c) => materias[c] || c).join(', ') || 'Todas')}</td><td>${+s.qtd || 'todas'}</td>
-      <td class="acoes-td">${lapis('simulado', s.id)}<button class="btn sec peq" data-del="simulado" data-id="${e(s.id)}">Excluir</button></td></tr>`).join('')}</table></div>` : ''}</section>
+      <td class="acoes-td">${lapis('simulado', s.id)}<button class="btn sec peq" data-del="simulado" data-id="${e(s.id)}">Excluir</button></td></tr>`).join('')}</table></div>` : ''}</details>
 
-  <section class="card" id="questao"><h2>3. Adicionar uma questão</h2>
+  <details class="card secao" id="questao"><summary><h2>3. Adicionar uma questão</h2><span class="seta" aria-hidden="true"></span></summary>
     <form data-f="nova_questao"><div class="duas"><label>Matéria ${selMateria('cat', materias)}</label><label>Nível <select name="nivel">${opNiveis('medio', false)}</select></label></div>
       <label>Enunciado <textarea name="enunciado" rows="3" required placeholder="Use uma situação prática, no nível de concurso..."></textarea></label>
       ${LETRAS.map((L, i) => `<label class="linha-op"><input type="radio" name="correta" value="${i}" required title="Marcar como correta"><b>${L}</b><input type="text" name="op${i}" placeholder="Alternativa ${L}" ${i < 2 ? 'required' : ''}></label>`).join('')}
       <small>Marque o círculo da alternativa correta. As letras são embaralhadas a cada prova.</small>
-      <label>Explicação do gabarito <textarea name="explicacao" rows="3"></textarea></label><button class="btn" type="submit">Cadastrar questão</button></form></section>
+      <label>Explicação do gabarito <textarea name="explicacao" rows="3"></textarea></label><button class="btn" type="submit">Cadastrar questão</button></form></details>
 
-  <section class="card" id="lote"><h2>4. Adicionar várias questões de uma vez (JSON)</h2>
+  <details class="card secao" id="lote"><summary><h2>4. Adicionar várias questões de uma vez (JSON)</h2><span class="seta" aria-hidden="true"></span></summary>
     <form data-f="questoes_lote"><div class="duas"><label>Matéria de destino ${selMateria('cat_lote', materias, '-- Usar o campo "cat" de cada questão --', false)}</label>
       <label>Nível padrão (se a questão não tiver "nivel") <select name="nivel_lote">${opNiveis('medio', false)}</select></label></div>
       <small>Escolhendo uma matéria acima, <b>todas</b> as questões vão para ela. Sem escolher, cada questão usa o seu "cat" e a matéria é criada se ainda não existir.</small>
-      <label>Cole a lista JSON <textarea name="json" rows="9" style="font-family:monospace" placeholder="${e(exemplo)}"></textarea></label>
+      <label>Cole a lista JSON <textarea name="json" rows="4" style="font-family:monospace" placeholder="${e(exemplo)}"></textarea></label>
       <label>…ou envie um arquivo .json <input type="file" name="arquivo" accept=".json,application/json"></label>
       <small>Campos: <b>enunciado</b>, <b>opcoes</b> (2 a 5 textos), <b>correta</b> ("A" a "E"), explicacao, nivel, cat. Questões repetidas na mesma matéria são ignoradas.</small><br>
-      <button class="btn" type="submit" style="margin-top:10px">Importar questões</button></form></section>
+      <button class="btn" type="submit" style="margin-top:10px">Importar questões</button></form></details>
 
-  <section class="card" id="apostilas"><h2>5. Apostilas e resumos</h2>
+  <details class="card secao" id="apostilas"><summary><h2>5. Apostilas e resumos</h2><span class="seta" aria-hidden="true"></span></summary>
     <form data-f="nova_apostila"><label>Título <input type="text" name="titulo" required></label>
       <div class="duas"><label>Matéria ${selMateria('cat', materias)}</label><label>Nível <select name="nivel">${opNiveis()}</select></label></div>
       <label>Conteúdo do resumo <textarea name="conteudo" rows="6"></textarea></label>
@@ -475,23 +489,26 @@ function viewAdmin(ancora) {
       <button class="btn" type="submit" style="margin-top:10px">Salvar apostila</button></form>
     ${apostilas.length ? `<div class="tabela"><table><tr><th>Título</th><th>Matéria</th><th>PDF</th><th></th></tr>
       ${apostilas.map((a) => `<tr><td><b>${e(a.titulo)}</b></td><td>${e(materias[normalizarCat(a.cat)] || a.cat)}</td><td>${a.pdf ? 'Sim' : 'Não'}</td>
-      <td class="acoes-td">${lapis('apostila', a.id)}<button class="btn sec peq" data-del="apostila" data-id="${e(a.id)}">Excluir</button></td></tr>`).join('')}</table></div>` : ''}</section>
+      <td class="acoes-td">${lapis('apostila', a.id)}<button class="btn sec peq" data-del="apostila" data-id="${e(a.id)}">Excluir</button></td></tr>`).join('')}</table></div>` : ''}</details>
 
-  <details class="card secao" id="lista" data-lembrar="lista" open>
+  <details class="card secao" id="lista" data-lembrar="lista">
     <summary><h2>6. Questões cadastradas (${questoes.length})</h2><span class="seta" aria-hidden="true"></span></summary>
     <div class="linha-op"><select id="filtro-cat"><option value="">Todas as matérias</option>${Object.entries(materias).map(([k, v]) => `<option value="${e(k)}" ${k === filtro ? 'selected' : ''}>${e(v)} (${cont[k] || 0})</option>`).join('')}</select></div>
-    <div class="tabela"><table>${questoes.slice().reverse().slice(0, 100).map((q) => `<tr><td>${e(materias[normalizarCat(q.cat)] || q.cat || '')}<br><small>${e(NIVEIS[q.nivel] || '')}</small></td>
+    <div class="tabela"><table>${questoesPagina.map((q) => `<tr><td>${e(materias[normalizarCat(q.cat)] || q.cat || '')}<br><small>${e(NIVEIS[q.nivel] || '')}</small></td>
       <td>${e((q.enunciado || '').length > 120 ? q.enunciado.slice(0, 120) + '…' : q.enunciado)}</td>
       <td class="acoes-td">${lapis('questao', q.id)}<button class="btn sec peq" data-del="questao" data-id="${e(q.id)}">Excluir</button></td></tr>`).join('')}</table></div>
-    ${questoes.length > 100 ? '<p class="sub">Mostrando as 100 mais recentes. Use o filtro por matéria.</p>' : ''}</details>
+    <nav class="paginacao" aria-label="Páginas de questões">${numeroPagina > 1 ? `<a class="btn sec peq" href="${e(linkPagina(numeroPagina - 1))}">Anterior</a>` : '<span></span>'}
+      <span>Página ${numeroPagina} de ${paginas} · ${questoes.length} questões</span>
+      ${numeroPagina < paginas ? `<a class="btn sec peq" href="${e(linkPagina(numeroPagina + 1))}">Próxima</a>` : '<span></span>'}</nav></details>
 
-  <section class="card" id="backup"><h2>7. Backup</h2>
+  <details class="card secao" id="backup"><summary><h2>7. Backup</h2><span class="seta" aria-hidden="true"></span></summary>
     <p class="sub">Exporte tudo (questões, resumos, matérias e simulados) em um arquivo, ou importe um backup anterior.</p>
     <button class="btn" id="exportar">Exportar backup (.json)</button>
     <label style="display:inline-block;margin-left:10px">Importar backup <input type="file" id="importar" accept=".json,application/json"></label>
-    <p><button class="btn sec peq" id="restaurar">Restaurar dados originais</button></p></section>`);
+    <p><button class="btn sec peq" id="restaurar">Restaurar dados originais</button></p></details>`);
 
-  if (ancora && document.getElementById(ancora)) document.getElementById(ancora).scrollIntoView();
+  const secao = document.getElementById(ancora || (filtro || parametros.has('pagina') ? 'lista' : ''));
+  if (secao) { secao.open = true; secao.scrollIntoView(); }
   const volta = (a, msg, ok = true) => { if (msg) flash(msg, ok); const alvo = '#/admin/' + a; if (location.hash === alvo) rota(); else location.hash = alvo; };
   document.getElementById('sair').onclick = async () => {
     if (ocupado) return;
@@ -503,7 +520,7 @@ function viewAdmin(ancora) {
   const publicar = document.getElementById('publicar');
   if (publicar) publicar.onclick = async () => { await salvarDB(); volta('', 'Conteúdo publicado no Supabase.'); };
   document.getElementById('filtro-cat').onchange = (ev) => { location.hash = '#/admin?cat=' + encodeURIComponent(ev.target.value); };
-  const det = document.getElementById('lista'); try { if (localStorage.getItem('secao_lista') === 'fechada') det.open = false; } catch (er) {}
+  const det = document.getElementById('lista'); try { if (!secao && localStorage.getItem('secao_lista') === 'fechada') det.open = false; } catch (er) {}
   det.addEventListener('toggle', () => { try { localStorage.setItem('secao_lista', det.open ? 'aberta' : 'fechada'); } catch (er) {} });
 
   $app.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
@@ -575,7 +592,7 @@ function viewAdmin(ancora) {
   };
   document.getElementById('restaurar').onclick = async () => {
     if (!confirm('Apagar todas as suas alterações e voltar aos dados originais?')) return;
-    DB = clone(window.DADOS_BASE); await salvarDB(); volta('backup', 'Dados originais restaurados.');
+    DB = await carregarBase(); await salvarDB(); volta('backup', 'Dados originais restaurados.');
   };
   protegerAcoes();
 }
@@ -583,7 +600,7 @@ function viewAdmin(ancora) {
 /* ---------- Editar ---------- */
 function viewEditar(tipo, id) {
   if (online && falhaConexao) return viewAdmin('');
-  if (online ? !admin : !sessionStorage.getItem('simulador_logado')) return viewLogin();
+  if (!online || !admin) return viewLogin();
   const mapa = { questao: ['questoes', 'lista'], simulado: ['simulados', 'simulados'], apostila: ['apostilas', 'apostilas'] };
   if (!mapa[tipo]) return (location.hash = '#/admin');
   const [chave, ancora] = mapa[tipo], idx = ler(chave).findIndex((x) => x.id === id);
@@ -634,9 +651,16 @@ async function iniciar() {
   if (online) {
     try {
       const dados = await nuvem.load();
-      publicado = !!dados; DB = dados || clone(window.DADOS_BASE);
+      publicado = !!dados; DB = dados || await carregarBase();
       try { admin = await nuvem.isAdmin(); } catch (_) { admin = false; }
-    } catch (error) { falhaConexao = error.message; }
+    } catch (error) {
+      falhaConexao = error.message;
+      try { DB = await carregarBase(); } catch (_) { DB = clone(DADOS_VAZIOS); }
+    }
+    pronto = true;
+  } else if (!lerStore(LS, localStorage)) {
+    pronto = false;
+    try { DB = await carregarBase(); } catch (error) { falhaConexao = error.message; }
     pronto = true;
   }
   rota();
