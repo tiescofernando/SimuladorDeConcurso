@@ -1,5 +1,11 @@
 SIMULADOR DE CONCURSO - versão estática (HTML/CSS/JS)
 
+ATUALIZAÇÃO: integração Supabase adicionada.
+Leia SUPABASE.md para criar as tabelas, cadastrar o administrador e ativar.
+Com Supabase configurado, as edições são compartilhadas e o login usa e-mail
+e senha do Supabase Authentication. As instruções locais abaixo descrevem
+o funcionamento anterior (ou o modo local, com config.js vazio).
+
 COMO USAR
 - Abra index.html no navegador (duplo clique). Não precisa de PHP nem servidor.
 - Para publicar: envie a pasta inteira para qualquer hospedagem estática

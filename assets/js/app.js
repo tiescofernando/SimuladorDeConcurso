@@ -1,5 +1,5 @@
 /* Simulador de Concurso — versão estática (HTML/CSS/JS puro).
-   Dados base: data/dados.js. Edições do admin ficam no localStorage deste navegador. */
+   Dados base: data/dados.js. Conteúdo compartilhado e autenticação via Supabase. */
 (function () {
 'use strict';
 const MAX_TENTATIVAS = 5;
@@ -18,9 +18,51 @@ const LS = 'simulador_dados_v1', SS = 'simulador_prova_v1';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 function lerStore(k, store) { try { return JSON.parse(store.getItem(k)); } catch (e) { return null; } }
 function gravarStore(k, v, store) { try { store.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
-let DB = lerStore(LS, localStorage) || clone(window.DADOS_BASE);
+const nuvem = window.SimuladorNuvem;
+const online = !!nuvem?.configured;
+let pronto = !online, admin = false, falhaConexao = '', ocupado = false, publicado = false, rotaPendente = false;
+let DB = online ? clone(window.DADOS_BASE) : lerStore(LS, localStorage) || clone(window.DADOS_BASE);
 ['questoes', 'apostilas', 'disciplinas', 'simulados'].forEach((k) => { if (!Array.isArray(DB[k])) DB[k] = []; });
-const salvarDB = () => gravarStore(LS, DB, localStorage);
+async function salvarDB() {
+  if (online) { await nuvem.save(DB); publicado = true; }
+  else if (!gravarStore(LS, DB, localStorage)) throw new Error('Não foi possível salvar neste navegador. Exporte um backup.');
+}
+// Impede duas edições simultâneas e restaura a tela se o banco recusar a escrita.
+function protegerAcoes() {
+  const elementos = $app.querySelectorAll('[data-del], form[data-f], #importar, #restaurar, #f-edit, #publicar');
+  elementos.forEach((el) => {
+    const prop = el.tagName === 'FORM' ? 'onsubmit' : el.id === 'importar' ? 'onchange' : 'onclick';
+    const acao = el[prop]; if (!acao) return;
+    el[prop] = async (ev) => {
+      ev.preventDefault();
+      if (ocupado) return;
+      ocupado = true;
+      const anterior = clone(DB);
+      const controles = [...$app.querySelectorAll('button, input, select, textarea')];
+      const desabilitados = controles.map((c) => c.disabled);
+      // Só desabilita depois que o handler já leu os campos do formulário.
+      const indicador = document.getElementById('estado-nuvem');
+      if (indicador) indicador.textContent = online ? 'Salvando no Supabase…' : 'Salvando…';
+      try {
+        const promessa = acao(ev);
+        controles.forEach((c) => { c.disabled = true; });
+        await promessa;
+      } catch (error) {
+        DB = anterior;
+        flash('Alteração não salva: ' + error.message, false);
+        if (location.hash.includes('/editar/')) {
+          const partes = location.hash.split('/'); viewEditar(partes[3], partes[4]);
+        } else viewAdmin('');
+      } finally {
+        ocupado = false;
+        controles.forEach((c, i) => { c.disabled = desabilitados[i]; });
+        const status = document.getElementById('estado-nuvem');
+        if (status) status.textContent = online ? 'Conectado ao Supabase.' : 'Modo local: alterações neste navegador.';
+        if (rotaPendente) { rotaPendente = false; rota(); }
+      }
+    };
+  });
+}
 const ler = (t) => DB[t];
 let estado = lerStore(SS, sessionStorage) || null; // {prova, resultado, historico}
 const salvarEstado = () => gravarStore(SS, estado, sessionStorage);
@@ -55,7 +97,7 @@ function salvarDisciplina(nome) {
   nome = nome.trim(); const slug = slugify(nome); if (!slug) return false;
   const ex = normalizarCat(nome); if (getMaterias()[ex]) return ex;
   const l = ler('disciplinas'); l.push({ id: l.length ? Math.max(...l.map((d) => d.id || 0)) + 1 : 1, slug, nome });
-  salvarDB(); return slug;
+  return slug;
 }
 function excluirDisciplina(slug) {
   if (MATERIAS_PADRAO[slug]) return 'Matérias padrão do sistema não podem ser excluídas.';
@@ -63,7 +105,7 @@ function excluirDisciplina(slug) {
   if (novo.length === l.length) return 'Matéria não encontrada.';
   if ((contarPorCat()[slug] || 0) > 0) return 'Esta matéria ainda tem questões. Exclua-as primeiro.';
   if (ler('apostilas').some((a) => normalizarCat(a.cat) === slug)) return 'Esta matéria ainda tem apostilas. Exclua-as primeiro.';
-  DB.disciplinas = novo; salvarDB(); return true;
+  DB.disciplinas = novo; return true;
 }
 function filtrarQuestoes(cats, nivel) {
   cats = (cats || []).map(normalizarCat).filter(Boolean);
@@ -95,8 +137,14 @@ function iniciarProva(pool, qtd, nome) {
 
 /* ---------- layout / roteador ---------- */
 let timerId = null;
-function pagina(html) { $app.innerHTML = html; window.scrollTo(0, 0); }
+function pagina(html) {
+  const aviso = falhaConexao && !location.hash.startsWith('#/admin')
+    ? `<p class="aviso" role="alert">${e(falhaConexao)} Exibindo o conteúdo original, sem sincronização. <a href="#/admin">Verificar conexão</a></p>` : '';
+  $app.innerHTML = aviso + html; window.scrollTo(0, 0);
+}
 function rota() {
+  if (!pronto) return pagina('<p class="card" role="status">Conectando ao Supabase…</p>');
+  if (ocupado) { rotaPendente = true; return; }
   clearInterval(timerId);
   const h = location.hash.replace(/^#/, '') || '/';
   const partes = h.split('?')[0].split('/').filter(Boolean).map(decodeURIComponent);
@@ -278,6 +326,7 @@ async function hash(s) {
   catch (er) { let h = 5381; for (const c of 'simulador:' + s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return 'x' + h; }
 }
 function viewLogin() {
+  if (online) return viewLoginNuvem();
   const novo = !localStorage.getItem('simulador_admin');
   pagina(`<h1>${novo ? 'Crie a senha do administrador' : 'Entrar no painel'}</h1><p class="aviso oculto" id="erro"></p>
   <form class="card estreito" id="f-login"><label>Senha <input type="password" name="senha" required></label>
@@ -292,6 +341,19 @@ function viewLogin() {
       localStorage.setItem('simulador_admin', await hash(s));
     } else if ((await hash(s)) !== localStorage.getItem('simulador_admin')) return mostrar('Senha incorreta.');
     sessionStorage.setItem('simulador_logado', '1'); rota();
+  };
+}
+function viewLoginNuvem() {
+  pagina(`<h1>Entrar no painel</h1><p class="aviso oculto" id="erro" role="alert"></p>
+    <form class="card estreito" id="f-login"><label>E-mail <input type="email" name="email" autocomplete="username" required></label>
+    <label>Senha <input type="password" name="senha" autocomplete="current-password" required></label>
+    <button class="btn">Entrar</button><p class="sub">Use a conta de administrador cadastrada no Supabase Authentication.</p></form>`);
+  document.getElementById('f-login').onsubmit = async (ev) => {
+    ev.preventDefault(); const f = ev.target, btn = f.querySelector('button'), erro = document.getElementById('erro');
+    btn.disabled = true; erro.classList.add('oculto');
+    try { await nuvem.signIn(f.email.value.trim(), f.senha.value); admin = true; rota(); }
+    catch (error) { erro.textContent = error.message; erro.classList.remove('oculto'); }
+    finally { btn.disabled = false; }
   };
 }
 const selMateria = (nome, materias, vazio = '-- Selecione a matéria --', req = true, atual = '') =>
@@ -340,12 +402,15 @@ function adicionarQuestoes(itens, catForcada = '', nivelPadrao = 'medio') {
     const chave = cat + '|' + n.q.enunciado.toLowerCase(); if (vistos.has(chave)) return r.dup++;
     vistos.add(chave); todas.push(Object.assign({ id: proximoId(todas, 'q'), cat }, n.q)); r.add++;
   });
-  if (r.add) salvarDB();
   return r;
 }
 
 function viewAdmin(ancora) {
-  if (!sessionStorage.getItem('simulador_logado')) return viewLogin();
+  if (online && falhaConexao) {
+    pagina(`<h1>Conexão pendente</h1><p class="aviso">${e(falhaConexao)}</p><button class="btn" id="reconectar">Tentar novamente</button>`);
+    document.getElementById('reconectar').onclick = iniciar; return;
+  }
+  if (online ? !admin : !sessionStorage.getItem('simulador_logado')) return viewLogin();
   const materias = getMaterias(), cont = contarPorCat(), apostilas = ler('apostilas'), simulados = ler('simulados');
   const filtro = normalizarCat(new URLSearchParams((location.hash.split('?')[1]) || '').get('cat') || '');
   const questoes = ler('questoes').filter((q) => !filtro || normalizarCat(q.cat) === filtro);
@@ -354,7 +419,8 @@ function viewAdmin(ancora) {
   const chk = (n) => Object.entries(materias).map(([k, v]) => `<label class="chip"><input type="checkbox" name="${n}" value="${e(k)}"> ${e(v)} <small>${cont[k] || 0}</small></label>`).join('');
   pagina(`<div class="topo-admin"><h1>Painel de Administração</h1><button class="btn sec peq" id="sair">Sair</button></div>
   ${fl ? `<p class="aviso ${fl[1] ? 'ok' : ''} relatorio">${e(fl[0])}</p>` : ''}
-  <p class="sub">As alterações ficam salvas <b>neste navegador</b> (localStorage). Use “Backup” abaixo para exportar e levar para outro computador.</p>
+  <p class="sub" id="estado-nuvem" role="status">${online ? 'Conectado ao Supabase. As alterações salvas ficam disponíveis para todos os visitantes.' : 'Modo local: as alterações ficam salvas apenas neste navegador.'}</p>
+  ${online && !publicado ? '<p class="aviso">O banco ainda está vazio. Publique o conteúdo inicial ou importe seu backup.</p><button class="btn" id="publicar">Publicar conteúdo inicial</button>' : ''}
 
   <section class="card" id="materias"><h2>1. Matérias (disciplinas)</h2>
     <form class="linha-op" data-f="nova_disciplina"><input type="text" name="nome" placeholder="Nova matéria. Ex.: Informática, Direitos Humanos" required><button class="btn" type="submit">Cadastrar</button></form>
@@ -418,17 +484,25 @@ function viewAdmin(ancora) {
 
   if (ancora && document.getElementById(ancora)) document.getElementById(ancora).scrollIntoView();
   const volta = (a, msg, ok = true) => { if (msg) flash(msg, ok); const alvo = '#/admin/' + a; if (location.hash === alvo) rota(); else location.hash = alvo; };
-  document.getElementById('sair').onclick = () => { sessionStorage.removeItem('simulador_logado'); location.hash = '#/'; };
+  document.getElementById('sair').onclick = async () => {
+    if (ocupado) return;
+    admin = false; sessionStorage.removeItem('simulador_logado');
+    try { if (online) await nuvem.signOut(); }
+    catch (_) { /* A sessão local já foi encerrada. */ }
+    location.hash = '#/';
+  };
+  const publicar = document.getElementById('publicar');
+  if (publicar) publicar.onclick = async () => { await salvarDB(); volta('', 'Conteúdo publicado no Supabase.'); };
   document.getElementById('filtro-cat').onchange = (ev) => { location.hash = '#/admin?cat=' + encodeURIComponent(ev.target.value); };
   const det = document.getElementById('lista'); try { if (localStorage.getItem('secao_lista') === 'fechada') det.open = false; } catch (er) {}
   det.addEventListener('toggle', () => { try { localStorage.setItem('secao_lista', det.open ? 'aberta' : 'fechada'); } catch (er) {} });
 
-  $app.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => {
+  $app.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     const t = b.dataset.del, id = b.dataset.id;
     if (!confirm('Excluir ' + { disciplina: 'esta matéria', simulado: 'este simulado', apostila: 'esta apostila', questao: 'esta questão' }[t] + '?')) return;
-    if (t === 'disciplina') { const r = excluirDisciplina(id); return volta('materias', r === true ? 'Matéria excluída.' : r, r === true); }
+    if (t === 'disciplina') { const r = excluirDisciplina(id); if (r === true) await salvarDB(); return volta('materias', r === true ? 'Matéria excluída.' : r, r === true); }
     const chave = { simulado: 'simulados', apostila: 'apostilas', questao: 'questoes' }[t], n = DB[chave].length;
-    DB[chave] = DB[chave].filter((x) => x.id !== id); salvarDB();
+    DB[chave] = DB[chave].filter((x) => x.id !== id); await salvarDB();
     volta({ simulado: 'simulados', apostila: 'apostilas', questao: 'lista' }[t], DB[chave].length < n ? 'Excluído.' : 'Não foi possível excluir.', DB[chave].length < n);
   });
   $app.querySelectorAll('form[data-f]').forEach((f) => f.onsubmit = async (ev) => {
@@ -436,19 +510,19 @@ function viewAdmin(ancora) {
     const cats = [...f.querySelectorAll('[name=cats]:checked')].map((i) => i.value);
     if (a === 'nova_disciplina') {
       const nome = v('nome').trim(); if (!slugify(nome)) return volta('materias', 'Informe o nome da matéria.', false);
-      const ja = !!getMaterias()[normalizarCat(nome)]; salvarDisciplina(nome);
+      const ja = !!getMaterias()[normalizarCat(nome)]; salvarDisciplina(nome); if (!ja) await salvarDB();
       return volta('materias', ja ? `A matéria "${nome}" já existia.` : `Matéria "${nome}" cadastrada.`);
     }
     if (a === 'novo_simulado') {
       const nivel = NIVEIS[v('nivel')] ? v('nivel') : '', qtd = Math.max(0, Math.min(100, +v('qtd') || 0));
       if (!filtrarQuestoes(cats, nivel).length) return volta('simulados', 'Não há questões para essa combinação de matérias e nível. Cadastre questões antes.', false);
       ler('simulados').push({ id: proximoId(ler('simulados'), 's'), nome: v('nome').trim(), descricao: v('descricao').trim(), cats: cats.map(normalizarCat).filter(Boolean), nivel, qtd });
-      salvarDB(); return volta('simulados', `Simulado "${v('nome').trim()}" criado. Ele já aparece na página inicial.`);
+      await salvarDB(); return volta('simulados', `Simulado "${v('nome').trim()}" criado. Ele já aparece na página inicial.`);
     }
     if (a === 'nova_apostila') {
       const titulo = v('titulo').trim(), cat = v('cat'), conteudo = v('conteudo').trim(), pdf = v('pdf').trim();
       if (!(titulo && cat && (conteudo || pdf))) return volta('apostilas', 'Preencha título, matéria e conteúdo (ou informe um PDF).', false);
-      ler('apostilas').push({ id: proximoId(ler('apostilas'), 'a'), cat: normalizarCat(cat), nivel: v('nivel'), titulo, conteudo, pdf }); salvarDB();
+      ler('apostilas').push({ id: proximoId(ler('apostilas'), 'a'), cat: normalizarCat(cat), nivel: v('nivel'), titulo, conteudo, pdf }); await salvarDB();
       return volta('apostilas', 'Apostila adicionada.');
     }
     if (a === 'nova_questao') {
@@ -457,6 +531,7 @@ function viewAdmin(ancora) {
       LETRAS.forEach((_, i) => { const o = v('op' + i).trim(); if (!o) return; if (i === idx) novo = lim.length; lim.push(o); });
       if (novo === null) return volta('questao', 'A alternativa marcada como correta está vazia.', false);
       const r = adicionarQuestoes([{ enunciado: v('enunciado'), opcoes: lim, correta: LETRAS[novo], explicacao: v('explicacao') }], cat, v('nivel') || 'medio');
+      if (r.add) await salvarDB();
       return volta('questao', r.add ? `Questão cadastrada em "${getMaterias()[cat]}".` : r.dup ? 'Essa questão já existe nesta matéria.' : (r.erros.join('\n') || 'Questão inválida.'), !!r.add);
     }
     if (a === 'questoes_lote') {
@@ -464,6 +539,7 @@ function viewAdmin(ancora) {
       const L = lerJsonQuestoes(texto); if (L.erro) return volta('lote', L.erro + '\nDica: cole só o array [ ... ] e confira vírgulas e aspas.', false);
       if (!L.itens.length) return volta('lote', 'A lista está vazia.', false);
       const catF = v('cat_lote') ? normalizarCat(v('cat_lote')) : '', r = adicionarQuestoes(L.itens, catF, NIVEIS[v('nivel_lote')] ? v('nivel_lote') : 'medio');
+      if (r.add || Object.keys(r.criadas).length) await salvarDB();
       let msg = `Lidas: ${L.itens.length} · Adicionadas: ${r.add} · Duplicadas ignoradas: ${r.dup} · Com erro: ${r.erros.length}`;
       if (catF) msg += '\nMatéria de destino: ' + (getMaterias()[catF] || catF);
       if (Object.keys(r.criadas).length) msg += '\nMatérias criadas automaticamente: ' + Object.values(r.criadas).join(', ');
@@ -481,18 +557,23 @@ function viewAdmin(ancora) {
       const d = JSON.parse(await f.text());
       if (!d || !Array.isArray(d.questoes)) throw new Error('arquivo sem a lista "questoes"');
       if (!confirm('Isto substitui TODOS os dados atuais pelos do backup. Continuar?')) return;
-      DB = { questoes: d.questoes, apostilas: d.apostilas || [], disciplinas: d.disciplinas || [], simulados: d.simulados || [] }; salvarDB(); volta('backup', 'Backup importado.');
-    } catch (er) { volta('backup', 'Backup inválido: ' + er.message, false); }
+      const dados = { questoes: d.questoes, apostilas: d.apostilas || [], disciplinas: d.disciplinas || [], simulados: d.simulados || [] };
+      if (!nuvem.validData(dados)) throw new Error('listas de conteúdo inválidas');
+      DB = dados;
+    } catch (er) { return volta('backup', 'Backup inválido: ' + er.message, false); }
+    await salvarDB(); volta('backup', 'Backup importado.');
   };
-  document.getElementById('restaurar').onclick = () => {
+  document.getElementById('restaurar').onclick = async () => {
     if (!confirm('Apagar todas as suas alterações e voltar aos dados originais?')) return;
-    localStorage.removeItem(LS); DB = clone(window.DADOS_BASE); volta('backup', 'Dados originais restaurados.');
+    DB = clone(window.DADOS_BASE); await salvarDB(); volta('backup', 'Dados originais restaurados.');
   };
+  protegerAcoes();
 }
 
 /* ---------- Editar ---------- */
 function viewEditar(tipo, id) {
-  if (!sessionStorage.getItem('simulador_logado')) return viewLogin();
+  if (online && falhaConexao) return viewAdmin('');
+  if (online ? !admin : !sessionStorage.getItem('simulador_logado')) return viewLogin();
   const mapa = { questao: ['questoes', 'lista'], simulado: ['simulados', 'simulados'], apostila: ['apostilas', 'apostilas'] };
   if (!mapa[tipo]) return (location.hash = '#/admin');
   const [chave, ancora] = mapa[tipo], idx = ler(chave).findIndex((x) => x.id === id);
@@ -514,7 +595,7 @@ function viewEditar(tipo, id) {
   pagina(`<div class="topo-admin"><h1>Editar ${tipo === 'questao' ? 'questão' : tipo}</h1><a class="btn sec peq" href="#/admin/${ancora}">← Voltar ao painel</a></div>
   ${fl ? `<p class="aviso ${fl[1] ? 'ok' : ''} relatorio">${e(fl[0])}</p>` : ''}
   <form class="card" id="f-edit">${corpo}<button class="btn" type="submit">Salvar alterações</button> <a class="btn sec" href="#/admin/${ancora}">Cancelar</a></form>`);
-  document.getElementById('f-edit').onsubmit = (ev) => {
+  document.getElementById('f-edit').onsubmit = async (ev) => {
     ev.preventDefault(); const f = ev.target, v = (n) => f.elements[n].value; let erro = null;
     if (tipo === 'questao') {
       const cat = normalizarCat(v('cat')), ci = +v('correta'), lim = []; let novo = null;
@@ -532,9 +613,22 @@ function viewEditar(tipo, id) {
       else ler(chave)[idx] = { id, cat: normalizarCat(v('cat')), nivel: v('nivel'), titulo: v('titulo').trim(), conteudo: v('conteudo').trim(), pdf: v('pdf').trim() };
     }
     if (erro) { flash(erro, false); return viewEditar(tipo, id); }
-    salvarDB(); flash('Alterações salvas.', true); location.hash = '#/admin/' + ancora;
+    await salvarDB(); flash('Alterações salvas.', true); location.hash = '#/admin/' + ancora;
   };
+  protegerAcoes();
 }
 
-rota();
+async function iniciar() {
+  pronto = !online; falhaConexao = ''; admin = false; rota();
+  if (online) {
+    try {
+      const dados = await nuvem.load();
+      publicado = !!dados; DB = dados || clone(window.DADOS_BASE);
+      try { admin = await nuvem.isAdmin(); } catch (_) { admin = false; }
+    } catch (error) { falhaConexao = error.message; }
+    pronto = true;
+  }
+  rota();
+}
+iniciar();
 })();

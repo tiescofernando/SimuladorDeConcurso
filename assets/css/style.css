@@ -13,7 +13,7 @@ h1{font-size:1.7rem;margin:28px 0 6px}h2{font-size:1.2rem}
 .card{background:var(--cartao);border:1px solid var(--linha);border-radius:10px;padding:20px;margin:16px 0}
 fieldset{border:0;padding:0;margin:0 0 16px}legend{font-weight:600;margin-bottom:8px}
 label{display:block;margin:10px 0}
-input[type=text],input[type=password],input[type=number],select,textarea{width:100%;padding:9px 11px;border:1px solid var(--linha);border-radius:6px;background:var(--papel);color:var(--tinta);font:inherit;margin-top:4px}
+input[type=text],input[type=email],input[type=password],input[type=number],select,textarea{width:100%;padding:9px 11px;border:1px solid var(--linha);border-radius:6px;background:var(--papel);color:var(--tinta);font:inherit;margin-top:4px}
 input[type=number]{width:110px}
 .chip{display:inline-block;border:1px solid var(--linha);border-radius:999px;padding:6px 14px;margin:0 6px 8px 0;cursor:pointer;text-decoration:none;color:var(--tinta);background:var(--papel)}
 .chip.ativo,.chip:has(input:checked){background:var(--azul);border-color:var(--azul);color:var(--sobre-azul)}
