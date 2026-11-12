@@ -1,0 +1,21 @@
+SIMULADOR DE CONCURSO - versão estática (HTML/CSS/JS)
+
+COMO USAR
+- Abra index.html no navegador (duplo clique). Não precisa de PHP nem servidor.
+- Para publicar: envie a pasta inteira para qualquer hospedagem estática
+  (GitHub Pages, Netlify, Vercel, etc.).
+
+ESTRUTURA
+- index.html            página única; as telas trocam por #/ (início, prova, resultado, resumo, admin)
+- assets/css/style.css  mesmo visual do original (claro/escuro automático)
+- assets/js/app.js      toda a lógica (simulado, correção, tentativas, admin)
+- data/dados.js         dados originais: 527 questões, 13 resumos, 3 simulados, matérias
+- pdfs/                 os 6 PDFs das apostilas
+
+DIFERENÇAS EM RELAÇÃO AO PHP
+- Sem servidor, as edições do painel admin ficam no localStorage DESTE navegador.
+  Use Admin > 7. Backup para exportar/importar e levar para outro lugar.
+- A senha do admin só protege a tela neste navegador; não é segurança real.
+- Upload de PDF não existe: coloque o arquivo em pdfs/ e informe "pdfs/nome.pdf" no resumo.
+- Para mudar os dados oficiais para todos os visitantes, exporte o backup e
+  substitua o conteúdo de data/dados.js por: window.DADOS_BASE = <conteúdo do backup>;

@@ -1,0 +1,99 @@
+:root{--tinta:#14213d;--papel:#f3f5f9;--cartao:#fff;--linha:#d9deea;--azul:#2347b5;--verde:#1e9e57;--verde-bg:#dff5e8;--verm:#d33c3c;--verm-bg:#fbe1e1;--muted:#5c6780;--sobre-azul:#fff;--link:#2d4fb8}
+@media(prefers-color-scheme:dark){:root{--tinta:#e8ecf6;--papel:#10151f;--cartao:#1a2130;--linha:#2d374c;--azul:#7d9bff;--verde:#4cd58a;--verde-bg:#143626;--verm:#ff7b7b;--verm-bg:#3d1a1d;--muted:#9aa6c0;--sobre-azul:#0b1020;--link:#9fb2e8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font:16px/1.55 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:0 18px}
+main.wrap{padding-bottom:60px}
+.topo{background:#14213d;color:#f3f5f9}
+.topo .wrap{display:flex;justify-content:space-between;align-items:center;height:56px}
+.topo a{color:#f3f5f9;text-decoration:none;margin-left:18px}
+.topo .logo{margin:0;font-weight:700;font-size:1.05rem}
+h1{font-size:1.7rem;margin:28px 0 6px}h2{font-size:1.2rem}
+.sub,.meta,small{color:var(--muted)}
+.card{background:var(--cartao);border:1px solid var(--linha);border-radius:10px;padding:20px;margin:16px 0}
+fieldset{border:0;padding:0;margin:0 0 16px}legend{font-weight:600;margin-bottom:8px}
+label{display:block;margin:10px 0}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;padding:9px 11px;border:1px solid var(--linha);border-radius:6px;background:var(--papel);color:var(--tinta);font:inherit;margin-top:4px}
+input[type=number]{width:110px}
+.chip{display:inline-block;border:1px solid var(--linha);border-radius:999px;padding:6px 14px;margin:0 6px 8px 0;cursor:pointer;text-decoration:none;color:var(--tinta);background:var(--papel)}
+.chip.ativo,.chip:has(input:checked){background:var(--azul);border-color:var(--azul);color:var(--sobre-azul)}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip:has(input:focus-visible){outline:2px solid var(--azul);outline-offset:2px}
+.btn{display:inline-block;background:var(--azul);color:var(--sobre-azul);border:0;border-radius:8px;padding:12px 22px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+.btn.sec{background:transparent;color:var(--azul);border:1px solid var(--azul)}.btn.peq{padding:5px 12px}
+.btn:hover{filter:brightness(1.1)}
+.aviso{background:var(--verm-bg);border-left:4px solid var(--verm);padding:10px 14px;border-radius:6px}.aviso.ok{background:var(--verde-bg);border-color:var(--verde)}
+.layout{display:grid;grid-template-columns:1fr 190px;gap:20px;align-items:start}
+.barra-prova{display:flex;flex-wrap:wrap;gap:22px;align-items:center;position:sticky;top:0;z-index:5;margin-top:16px;padding:12px 18px}
+.progresso{flex-basis:100%;height:6px;background:var(--linha);border-radius:3px;overflow:hidden}.progresso i{display:block;height:100%;width:0;background:var(--azul);transition:width .25s}
+.mapa{position:sticky;top:96px}.mapa h3{margin:0 0 10px;font-size:1rem}
+.grade{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.grade a{text-align:center;padding:5px 0;border:1px solid var(--linha);border-radius:6px;text-decoration:none;color:var(--tinta);font-size:.9rem}
+.grade a.feita{background:var(--azul);border-color:var(--azul);color:var(--sobre-azul)}
+.enun{font-size:1.05rem;margin:8px 0 14px}
+.opcao{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--linha);border-radius:8px;padding:10px 12px;margin:8px 0;cursor:pointer}
+.opcao:hover{border-color:var(--azul)}
+.opcao input{position:absolute;opacity:0}
+.opcao:has(input:checked){border-color:var(--azul);background:color-mix(in srgb,var(--azul) 12%,transparent)}
+.opcao:has(input:focus-visible){outline:2px solid var(--azul)}
+.letra{flex:none;width:28px;height:28px;border-radius:50%;background:var(--linha);display:grid;place-items:center;font-weight:700;font-size:.9rem}
+.opcao:has(input:checked) .letra{background:var(--azul);color:var(--sobre-azul)}
+.opcao small{margin-left:auto;white-space:nowrap}
+div.opcao{cursor:default}
+.opcao.certa{background:var(--verde-bg);border-color:var(--verde)}.opcao.certa .letra{background:var(--verde);color:#fff}
+.opcao.errada{background:var(--verm-bg);border-color:var(--verm)}.opcao.errada .letra{background:var(--verm);color:#fff}
+.expl{margin-top:14px;padding:12px 14px;background:var(--papel);border-radius:8px;border-left:4px solid var(--azul)}
+.tcerta{color:var(--verde)}.terrada{color:var(--verm)}
+.nota{font-size:2.4rem;font-weight:800}.nota small{font-size:1rem}.nota.ok{color:var(--verde)}.nota.ruim{color:var(--verm)}
+.gab-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:8px;margin:12px 0}
+.gab{display:flex;flex-direction:column;align-items:center;border-radius:8px;padding:6px 4px;text-decoration:none;color:#fff;font-size:.85rem;min-height:62px}
+.gab b{font-size:.75rem;opacity:.9}.gab span{font-size:1.2rem;font-weight:800}.gab em{font-style:normal;font-size:.75rem;background:rgba(255,255,255,.28);border-radius:4px;padding:0 6px}
+.gab.certa{background:#1e9e57}.gab.errada{background:#d33c3c}
+.legenda i{display:inline-block;width:12px;height:12px;border-radius:3px;margin:0 4px 0 12px;vertical-align:-1px}.legenda i.certa{background:#1e9e57}.legenda i.errada{background:#d33c3c}
+.hist span{margin-left:12px;font-weight:600}
+.grid-cats{display:flex;flex-wrap:wrap}
+.filtros{margin:12px 0}
+.apostila .texto{max-width:75ch}
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.linha-op{display:flex;align-items:center;gap:10px}.linha-op input[type=text]{margin:0}
+.tabela table{width:100%;border-collapse:collapse}.tabela td{padding:8px;border-bottom:1px solid var(--linha);vertical-align:top}
+.estreito{max-width:420px}.sair{font-size:.9rem;margin-left:14px}
+@media(max-width:800px){.layout,.duas{grid-template-columns:1fr}.mapa{display:none}.barra-prova{gap:12px;font-size:.9rem}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.cards-sim{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.cards-sim .card{margin:0}.sim h3{margin:0 0 6px}.sim p{margin:4px 0 12px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.chip.zero{opacity:.55}
+.checks{display:flex;flex-wrap:wrap}
+.relatorio{white-space:pre-line}
+.tabela th{text-align:left;padding:8px;border-bottom:2px solid var(--linha)}
+.topo-admin{display:flex;justify-content:space-between;align-items:center}
+
+.acoes-td{text-align:right;white-space:nowrap}
+.btn-icone{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;vertical-align:middle}
+details.secao>summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;gap:12px}
+details.secao>summary::-webkit-details-marker{display:none}
+details.secao>summary h2{margin:0}
+.seta{width:34px;height:34px;flex:none;border:1px solid var(--linha);border-radius:8px;display:grid;place-items:center}
+.seta::before{content:"";width:9px;height:9px;border-right:2px solid var(--tinta);border-bottom:2px solid var(--tinta);transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s}
+details.secao[open]>summary .seta::before{transform:rotate(-135deg) translate(-2px,-2px)}
+details.secao>summary:hover .seta{border-color:var(--azul)}
+details.secao>summary:focus-visible{outline:2px solid var(--azul);outline-offset:4px;border-radius:6px}
+details.secao[open]>summary{margin-bottom:12px}
+
+.chip:has(input:checked) small{color:inherit;opacity:.9;font-weight:700}
+.chip small.n{margin-left:4px;font-weight:600}
+.resumo-sel{margin:12px 0;font-weight:600;color:var(--azul)}
+
+/* links: cor suave no lugar do azul/roxo padrão do navegador */
+a{color:var(--link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:color-mix(in srgb,var(--link) 40%,transparent)}
+a:hover{text-decoration-color:currentColor}
+a:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:3px}
+.tabela td>a{font-weight:600;text-decoration:none}
+.tabela td>a:hover{text-decoration:underline}
+.revisar a{display:inline-block;margin:4px 14px 4px 0}
+
+/* --- versão estática --- */
+.oculto{display:none!important}
+.tabela a.link,.tabela button.link{background:none;border:0;color:var(--link);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+.opcao.sel-cert{cursor:pointer}
