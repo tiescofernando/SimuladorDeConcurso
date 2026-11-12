@@ -50,8 +50,15 @@ Nunca substitua por uma chave `service_role`, `sb_secret_` ou senha do banco.
   autoriza alterações no Supabase.
 - Se o banco estiver inacessível ou ainda não configurado, os estudantes
   podem usar os dados originais e veem um aviso; o painel bloqueia edições.
-- Os PDFs continuam na pasta `pdfs/`. Esta integração não cria uploads no
-  Supabase Storage. Provas, respostas e tentativas continuam na sessão do
+- Os PDFs originais continuam na pasta `pdfs/`. O painel permite selecionar
+  novos PDFs no computador, de até 20 MB, ao cadastrar ou editar uma apostila.
+  A migração `20261112190232_apostilas_pdf_upload.sql` cria o bucket público
+  `apostilas` com MIME `application/pdf`; apenas administradores enviam arquivos.
+  Um arquivo selecionado substitui o link do formulário ao salvar. Arquivos
+  anteriores são mantidos para preservar links e backups. Se o upload funcionar
+  e a gravação da apostila falhar, o arquivo pode permanecer sem referência no
+  Storage; ele pode ser removido posteriormente pelo painel do Supabase.
+  Provas, respostas e tentativas continuam na sessão do
   navegador e não são enviadas ao banco.
 - Os visitantes carregam o conteúdo ao abrir/recarregar o site; não há
   assinatura Realtime. Não há dependência de CDN ou SDK externo.

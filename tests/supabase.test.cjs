@@ -12,7 +12,7 @@ function client(replies, options = {}) {
   const context = {
     window: { SUPABASE_CONFIG: { url: 'https://teste.supabase.co/rest/v1/', publicKey: options.key || 'sb_publishable_teste' } },
     sessionStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) },
-    atob, AbortSignal, Date,
+    atob, AbortSignal, Date, crypto: require('node:crypto').webcrypto,
     fetch: async (url, init) => {
       calls.push({ url, ...init });
       const reply = replies.shift();
@@ -25,6 +25,28 @@ function client(replies, options = {}) {
   return { api: context.window.SimuladorNuvem, calls, storage };
 }
 const ok = data => ({ status: 200, data });
+
+test('PDF é enviado como arquivo binário com JWT e gera link público', async () => {
+  const { api, calls } = client([ok({ Key: 'apostilas/arquivo.pdf' })], { session: goodSession });
+  const file = new File(['%PDF-1.4\nconteudo de teste'], 'Apostila revisão.pdf', { type: 'application/pdf' });
+  const url = await api.uploadPdf(file);
+  assert.equal(calls[0].body, file);
+  assert.equal(calls[0].headers['Content-Type'], 'application/pdf');
+  assert.equal(calls[0].headers.Authorization, 'Bearer jwt-usuario');
+  assert.match(url, /^https:\/\/teste.supabase.co\/storage\/v1\/object\/public\/apostilas\/admin-id\/[\da-f-]+-Apostila-revisao.pdf$/);
+});
+test('upload rejeita sessão ausente, arquivo inválido, vazio e acima de 20 MB', async () => {
+  const { api, calls } = client([], { session: goodSession });
+  for (const file of [new File(['texto'], 'x.txt'), new File(['nao-pdf'], 'x.pdf', { type: 'application/pdf' }), new File([], 'x.pdf', { type: 'application/pdf' }), { name: 'x.pdf', type: 'application/pdf', size: 20971521 }]) {
+    await assert.rejects(api.uploadPdf(file));
+  }
+  assert.equal(calls.length, 0);
+  await assert.rejects(client([]).api.uploadPdf(new File(['%PDF-1.4'], 'x.pdf')), /Entre novamente/);
+});
+test('upload não retorna link quando o armazenamento recusa o envio', async () => {
+  const { api } = client([{ status: 403, data: {} }], { session: goodSession });
+  await assert.rejects(api.uploadPdf(new File(['%PDF-1.4'], 'x.pdf', { type: 'application/pdf' })), /Acesso negado/);
+});
 
 test('leitura pública normaliza URL e não envia publishable como Bearer', async () => {
   const { api, calls } = client([ok([{ dados, versao: 3 }])]);

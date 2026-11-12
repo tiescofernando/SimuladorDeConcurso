@@ -23,18 +23,18 @@
     if (key.startsWith('sb_secret_') || role === 'service_role') throw new Error('Use somente a chave pública publishable/anon.');
     if (!key.startsWith('sb_publishable_') && role !== 'anon') throw new Error('Chave pública Supabase inválida.');
   }
-  async function request(path, { method = 'GET', body, authenticated = false } = {}) {
+  async function request(path, { method = 'GET', body, authenticated = false, rawBody, contentType = 'application/json', timeout = 15000 } = {}) {
     validate();
     if (authenticated) {
       if (!session) throw new Error('Entre novamente no painel.');
       if (session.expires_at * 1000 < Date.now() + 60000) await refresh();
     }
-    const headers = { apikey: key, 'Content-Type': 'application/json' };
+    const headers = { apikey: key, 'Content-Type': contentType };
     // Publishable keys vão apenas no apikey. Bearer recebe somente o JWT do usuário.
     if (authenticated) headers.Authorization = 'Bearer ' + session.access_token;
     let response;
     try {
-      response = await fetch(url + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+      response = await fetch(url + path, { method, headers, body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)), signal: AbortSignal.timeout(timeout) });
     } catch (_) { throw new Error('Não foi possível conectar ao Supabase. Verifique a conexão e tente novamente.'); }
     const raw = await response.text();
     let data; try { data = raw ? JSON.parse(raw) : null; } catch (_) { data = null; }
@@ -66,6 +66,17 @@
   window.SimuladorNuvem = {
     configured,
     validData,
+    async uploadPdf(file) {
+      if (!session?.user?.id) throw new Error('Entre novamente no painel para enviar o PDF.');
+      if (!file || !/\.pdf$/i.test(file.name || '') || (file.type && file.type !== 'application/pdf')) throw new Error('Selecione um arquivo PDF.');
+      if (!file.size || file.size > 20 * 1024 * 1024) throw new Error('O PDF deve ter conteúdo e no máximo 20 MB.');
+      const signature = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+      if (String.fromCharCode(...signature) !== '%PDF-') throw new Error('O arquivo selecionado não é um PDF válido.');
+      const name = file.name.replace(/\.pdf$/i, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 80) || 'apostila';
+      const path = session.user.id + '/' + crypto.randomUUID() + '-' + name + '.pdf';
+      await request('/storage/v1/object/apostilas/' + path, { method: 'POST', authenticated: true, rawBody: file, contentType: 'application/pdf', timeout: 120000 });
+      return url + '/storage/v1/object/public/apostilas/' + path;
+    },
     async load() {
       const rows = await request('/rest/v1/simulador_conteudo?id=eq.1&select=dados,versao');
       if (!rows.length) { version = 0; return null; }

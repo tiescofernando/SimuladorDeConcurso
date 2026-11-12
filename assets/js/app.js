@@ -70,6 +70,15 @@ const salvarEstado = () => gravarStore(SS, estado, sessionStorage);
 /* ---------- utilitários ---------- */
 const e = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nl2br = (s) => e(s).replace(/\r?\n/g, '<br>');
+const campoArquivoPdf = () => `<label>Selecionar apostila em PDF <input type="file" name="arquivo_pdf" accept=".pdf,application/pdf" ${online ? '' : 'disabled'}></label>
+  <small>${online ? 'PDF de até 20 MB. Ao salvar, o arquivo será enviado e ficará disponível aos visitantes. Se selecionar um arquivo, ele será usado no lugar do link abaixo.' : 'Configure o Supabase para enviar arquivos.'}</small>`;
+async function pdfDoFormulario(f) {
+  const file = f.elements.arquivo_pdf?.files[0];
+  if (!file) return f.elements.pdf.value.trim();
+  const status = document.getElementById('estado-nuvem');
+  if (status) status.textContent = 'Enviando PDF… Aguarde a confirmação.';
+  return nuvem.uploadPdf(file);
+}
 const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 function slugify(t) {
   return String(t ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -461,8 +470,8 @@ function viewAdmin(ancora) {
     <form data-f="nova_apostila"><label>Título <input type="text" name="titulo" required></label>
       <div class="duas"><label>Matéria ${selMateria('cat', materias)}</label><label>Nível <select name="nivel">${opNiveis()}</select></label></div>
       <label>Conteúdo do resumo <textarea name="conteudo" rows="6"></textarea></label>
+      ${campoArquivoPdf()}
       <label>Link ou caminho do PDF (opcional) <input type="text" name="pdf" placeholder="pdfs/arquivo.pdf ou https://..."></label>
-      <small>Para PDFs próprios, coloque o arquivo na pasta <b>pdfs/</b> e informe <code>pdfs/nome.pdf</code>.</small><br>
       <button class="btn" type="submit" style="margin-top:10px">Salvar apostila</button></form>
     ${apostilas.length ? `<div class="tabela"><table><tr><th>Título</th><th>Matéria</th><th>PDF</th><th></th></tr>
       ${apostilas.map((a) => `<tr><td><b>${e(a.titulo)}</b></td><td>${e(materias[normalizarCat(a.cat)] || a.cat)}</td><td>${a.pdf ? 'Sim' : 'Não'}</td>
@@ -520,8 +529,9 @@ function viewAdmin(ancora) {
       await salvarDB(); return volta('simulados', `Simulado "${v('nome').trim()}" criado. Ele já aparece na página inicial.`);
     }
     if (a === 'nova_apostila') {
-      const titulo = v('titulo').trim(), cat = v('cat'), conteudo = v('conteudo').trim(), pdf = v('pdf').trim();
-      if (!(titulo && cat && (conteudo || pdf))) return volta('apostilas', 'Preencha título, matéria e conteúdo (ou informe um PDF).', false);
+      const titulo = v('titulo').trim(), cat = v('cat'), conteudo = v('conteudo').trim();
+      if (!(titulo && cat && (conteudo || v('pdf').trim() || f.elements.arquivo_pdf.files.length))) return volta('apostilas', 'Preencha título, matéria e conteúdo (ou selecione um PDF).', false);
+      const pdf = await pdfDoFormulario(f);
       ler('apostilas').push({ id: proximoId(ler('apostilas'), 'a'), cat: normalizarCat(cat), nivel: v('nivel'), titulo, conteudo, pdf }); await salvarDB();
       return volta('apostilas', 'Apostila adicionada.');
     }
@@ -591,6 +601,7 @@ function viewEditar(tipo, id) {
   else corpo = `<label>Título <input type="text" name="titulo" value="${e(item.titulo)}" required></label>
     <div class="duas"><label>Matéria ${selMateria('cat', materias, '-- Selecione --', true, normalizarCat(item.cat))}</label><label>Nível <select name="nivel">${opNiveis(item.nivel)}</select></label></div>
     <label>Conteúdo do resumo <textarea name="conteudo" rows="12">${e(item.conteudo)}</textarea></label>
+    ${campoArquivoPdf()}
     <label>Link ou caminho do PDF (vazio = sem PDF) <input type="text" name="pdf" value="${e(item.pdf || '')}"></label>`;
   pagina(`<div class="topo-admin"><h1>Editar ${tipo === 'questao' ? 'questão' : tipo}</h1><a class="btn sec peq" href="#/admin/${ancora}">← Voltar ao painel</a></div>
   ${fl ? `<p class="aviso ${fl[1] ? 'ok' : ''} relatorio">${e(fl[0])}</p>` : ''}
@@ -609,8 +620,8 @@ function viewEditar(tipo, id) {
       else if (!filtrarQuestoes(cats, nivel).length) erro = 'Não há questões para essa combinação de matérias e nível.';
       else ler(chave)[idx] = { id, nome: v('nome').trim(), descricao: v('descricao').trim(), cats: cats.map(normalizarCat).filter(Boolean), nivel, qtd: Math.max(0, Math.min(100, +v('qtd') || 0)) };
     } else {
-      if (!v('titulo').trim() || (!v('conteudo').trim() && !v('pdf').trim())) erro = 'Preencha o título e o conteúdo (ou mantenha um PDF).';
-      else ler(chave)[idx] = { id, cat: normalizarCat(v('cat')), nivel: v('nivel'), titulo: v('titulo').trim(), conteudo: v('conteudo').trim(), pdf: v('pdf').trim() };
+      if (!v('titulo').trim() || (!v('conteudo').trim() && !v('pdf').trim() && !f.elements.arquivo_pdf.files.length)) erro = 'Preencha o título e o conteúdo (ou selecione um PDF).';
+      else ler(chave)[idx] = { id, cat: normalizarCat(v('cat')), nivel: v('nivel'), titulo: v('titulo').trim(), conteudo: v('conteudo').trim(), pdf: await pdfDoFormulario(f) };
     }
     if (erro) { flash(erro, false); return viewEditar(tipo, id); }
     await salvarDB(); flash('Alterações salvas.', true); location.hash = '#/admin/' + ancora;
