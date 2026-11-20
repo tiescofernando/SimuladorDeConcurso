@@ -1,5 +1,22 @@
 # Integração do simulador com Supabase
 
+## Desenvolvimento local e níveis de ensino
+
+Execute `npm run dev` (ou `node scripts/dev.cjs`) nesta pasta para acessar
+`http://localhost:3000`; a administração fica em `http://localhost:3000/admin`.
+O servidor local publica somente a página e as pastas públicas. Os retornos
+de autenticação `http://localhost:3000/**` e `http://127.0.0.1:3000/**` estão
+liberados no Supabase; a URL principal continua sendo a hospedagem oficial.
+
+Na importação JSON, cada questão informa seu próprio `nivel`, como
+`fundamental`, `medio`, `superior` ou `tecnico`. Também são aceitos os nomes
+por extenso e os campos alternativos `ensino`, `escolaridade` e `nivel_ensino`.
+O campo de nível padrão do lote foi removido. Questões sem esse dado ficam
+em “Não informado”; o sistema não tenta adivinhar a escolaridade pelo texto.
+Os filtros públicos e administrativos são montados a partir dos níveis
+presentes nas questões. A lista administrativa é ordenada por ensino e permite
+combinar ensino e matéria, preservando ambos ao trocar de página.
+
 ## Segurança e acesso administrativo
 
 - A navegação pública mostra apenas simulados e resumos. Digite

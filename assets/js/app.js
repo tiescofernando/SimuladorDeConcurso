@@ -5,6 +5,25 @@
 const MAX_TENTATIVAS = 5;
 const LETRAS = ['A', 'B', 'C', 'D', 'E'];
 const NIVEIS = { fundamental: 'Ensino Fundamental', medio: 'Ensino Médio', superior: 'Ensino Superior' };
+function rotuloNivel(valor) {
+  const nivel = normalizarNivel(valor);
+  return NIVEIS[nivel] || ({ tecnico: 'Ensino Técnico', pos_graduacao: 'Pós-graduação' })[nivel]
+    || (nivel ? nivel.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : 'Não informado');
+}
+function getNiveis() {
+  const niveis = Object.assign(Object.create(null), NIVEIS);
+  ler('questoes').forEach((q) => { const nivel = normalizarNivel(q.nivel); if (nivel) niveis[nivel] = rotuloNivel(nivel); });
+  return niveis;
+}
+function niveisDisponiveis() {
+  const contagens = Object.create(null);
+  ler('questoes').forEach((q) => { const nivel = normalizarNivel(q.nivel) || 'sem_nivel'; contagens[nivel] = (contagens[nivel] || 0) + 1; });
+  const ordem = Object.keys(getNiveis()).concat('sem_nivel');
+  return ordem.filter((nivel) => contagens[nivel]).map((nivel) => [nivel, nivel === 'sem_nivel' ? 'Não informado' : rotuloNivel(nivel), contagens[nivel]]);
+}
+function doNivel(q, nivel) {
+  return !nivel || (nivel === 'sem_nivel' ? !normalizarNivel(q.nivel) : normalizarNivel(q.nivel) === normalizarNivel(nivel));
+}
 const MATERIAS_PADRAO = {
   portugues: 'Língua Portuguesa', interpretacao: 'Interpretação de Texto', matematica: 'Matemática e Raciocínio Lógico',
   gerais: 'Conhecimentos Gerais', legislacao: 'Legislação Municipal', rotinas: 'Rotinas Administrativas',
@@ -142,7 +161,7 @@ function excluirDisciplina(slug) {
 }
 function filtrarQuestoes(cats, nivel) {
   cats = (cats || []).map(normalizarCat).filter(Boolean);
-  return ler('questoes').filter((q) => (!cats.length || cats.includes(normalizarCat(q.cat))) && (!nivel || q.nivel === nivel));
+  return ler('questoes').filter((q) => (!cats.length || cats.includes(normalizarCat(q.cat))) && doNivel(q, nivel));
 }
 
 /* ---------- prova ---------- */
@@ -195,19 +214,19 @@ window.addEventListener('hashchange', rota);
 
 /* ---------- Home ---------- */
 function viewHome(erro) {
-  const materias = getMaterias(), cont = contarPorCat(), contN = {};
-  ler('questoes').forEach((q) => { const c = normalizarCat(q.cat); (contN[c] = contN[c] || {})[q.nivel || ''] = ((contN[c] || {})[q.nivel || ''] || 0) + 1; });
+  const materias = getMaterias(), cont = contarPorCat(), contN = {}, niveis = niveisDisponiveis();
+  ler('questoes').forEach((q) => { const c = normalizarCat(q.cat), nivel = normalizarNivel(q.nivel) || 'sem_nivel'; (contN[c] = contN[c] || {})[nivel] = ((contN[c] || {})[nivel] || 0) + 1; });
   const sims = ler('simulados');
   const cardsSim = sims.map((s) => {
     const disp = filtrarQuestoes(s.cats, s.nivel).length, qtd = +s.qtd || 0, n = qtd > 0 ? Math.min(qtd, disp) : disp;
     const nomes = (s.cats || []).map((c) => materias[c] || c).join(', ') || 'Todas as matérias';
     return `<div class="card sim"><h3>${e(s.nome)}</h3>${s.descricao ? `<p class="sub">${e(s.descricao)}</p>` : ''}
-      <p class="sub">${n} questões · ${e(NIVEIS[s.nivel || ''] || 'Todos os níveis')}<br>${e(nomes)}</p>
+      <p class="sub">${n} questões · ${e(s.nivel ? rotuloNivel(s.nivel) : 'Todos os níveis')}<br>${e(nomes)}</p>
       <button class="btn" data-sim="${e(s.id)}" ${n ? '' : 'disabled'}>Iniciar</button></div>`;
   }).join('');
   const chips = Object.keys(materias).map((k) => {
     const n = cont[k] || 0;
-    return `<label class="chip ${n ? '' : 'zero'}" data-total="${n}" ${Object.keys(NIVEIS).map((nk) => `data-${nk}="${(contN[k] || {})[nk] || 0}"`).join(' ')}>
+    return `<label class="chip ${n ? '' : 'zero'}" data-total="${n}" ${niveis.map(([nk]) => `data-${e(nk)}="${(contN[k] || {})[nk] || 0}"`).join(' ')}>
       <input type="checkbox" name="cats" value="${e(k)}"> ${e(materias[k])} <small class="n">${n}</small></label>`;
   }).join('');
   pagina(`<h1>Simulado de concurso</h1>
@@ -218,7 +237,7 @@ function viewHome(erro) {
   <form class="card" id="form-monte">
     <fieldset><legend>Nível da prova</legend>
       <label class="chip"><input type="radio" name="nivel" value="" checked> Todos</label>
-      ${Object.entries(NIVEIS).map(([k, v]) => `<label class="chip"><input type="radio" name="nivel" value="${k}"> ${v}</label>`).join('')}
+      ${niveis.map(([k, v, n]) => `<label class="chip"><input type="radio" name="nivel" value="${e(k)}"> ${e(v)} <small>${n}</small></label>`).join('')}
     </fieldset>
     <fieldset><legend>Matérias <small>(vazio = todas)</small></legend><div class="grid-cats">${chips}</div></fieldset>
     <label>Quantidade de questões <input type="number" name="qtd" value="10" min="1" max="100"></label>
@@ -266,7 +285,7 @@ function viewProva() {
   <div class="layout">
   <form id="form-prova">
     ${qs.map((q, i) => `<section class="card questao" id="q${i + 1}">
-      <div class="meta">Questão ${i + 1} · ${e(materias[normalizarCat(q.cat)] || q.cat || '')} · ${e(NIVEIS[q.nivel] || '')}</div>
+      <div class="meta">Questão ${i + 1} · ${e(materias[normalizarCat(q.cat)] || q.cat || '')} · ${e(rotuloNivel(q.nivel))}</div>
       <p class="enun">${nl2br(q.enunciado)}</p>
       ${q.opcoes.map((o, k) => `<label class="opcao"><input type="radio" name="r_${e(q.id)}" value="${LETRAS[k]}" ${estado.respostas[q.id] === LETRAS[k] ? 'checked' : ''}><span class="letra">${LETRAS[k]}</span><span>${e(o)}</span></label>`).join('')}
     </section>`).join('')}
@@ -347,7 +366,7 @@ function viewResumo(cat) {
   pagina(`<h1>Resumos para revisão</h1>
   <div class="filtros"><a class="chip ${!cn ? 'ativo' : ''}" href="#/resumo">Todos</a>
   ${Object.entries(materias).map(([k, v]) => `<a class="chip ${cn === k ? 'ativo' : ''}" href="#/resumo/${encodeURIComponent(k)}">${e(v)}</a>`).join('')}</div>
-  ${ap.map((a) => `<article class="card apostila"><div class="meta">${e(materias[normalizarCat(a.cat)] || a.cat)} · ${e(NIVEIS[a.nivel] || 'Todos os níveis')}</div>
+  ${ap.map((a) => `<article class="card apostila"><div class="meta">${e(materias[normalizarCat(a.cat)] || a.cat)} · ${e(a.nivel ? rotuloNivel(a.nivel) : 'Todos os níveis')}</div>
     <h2>${e(a.titulo)}</h2><div class="texto">${nl2br(a.conteudo)}</div>
     ${pdfSeguro(a.pdf) ? `<p><a class="btn sec" href="${e(pdfSeguro(a.pdf))}" target="_blank" rel="noopener noreferrer">Abrir apostila em PDF</a></p>` : ''}</article>`).join('')}
   ${ap.length ? '' : '<p class="aviso">Nenhum resumo cadastrado para essa matéria.</p>'}`);
@@ -376,10 +395,19 @@ function viewLoginNuvem() {
 }
 const selMateria = (nome, materias, vazio = '-- Selecione a matéria --', req = true, atual = '') =>
   `<select name="${nome}" ${req ? 'required' : ''}><option value="">${e(vazio)}</option>${Object.entries(materias).map(([k, v]) => `<option value="${e(k)}" ${k === atual ? 'selected' : ''}>${e(v)}</option>`).join('')}</select>`;
-const opNiveis = (atual = '', todos = true) => (todos ? `<option value="">Todos os níveis</option>` : '') + Object.entries(NIVEIS).map(([k, v]) => `<option value="${k}" ${k === atual ? 'selected' : ''}>${v}</option>`).join('');
+const opNiveis = (atual = '', todos = true) => (todos ? `<option value="">Todos os níveis</option>` : '<option value="">Não informado</option>') + Object.entries(getNiveis()).map(([k, v]) => `<option value="${e(k)}" ${k === normalizarNivel(atual) ? 'selected' : ''}>${e(v)}</option>`).join('');
 const lapis = (tipo, id) => `<a class="btn sec peq btn-icone" href="#/admin/editar/${tipo}/${encodeURIComponent(id)}" title="Editar" aria-label="Editar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></a> `;
 
 /* importação em lote (JSON) — mesma tolerância do PHP */
+function normalizarNivel(valor) {
+  const nivel = slugify(valor);
+  if (!nivel || ['sem_nivel', 'nao_informado'].includes(nivel)) return '';
+  if (nivel.includes('fundamental') || ['basico', '1_grau', 'primeiro_grau'].includes(nivel)) return 'fundamental';
+  if (nivel.includes('medio') || ['2_grau', 'segundo_grau'].includes(nivel)) return 'medio';
+  if (nivel.includes('superior') || ['graduacao', '3_grau', 'terceiro_grau'].includes(nivel)) return 'superior';
+  if (['tecnico', 'ensino_tecnico'].includes(nivel)) return 'tecnico';
+  return nivel;
+}
 function lerJsonQuestoes(txt) {
   txt = String(txt || '').replace(/^\uFEFF/, '').trim().replace(/^```[a-zA-Z]*\s*|\s*```$/g, '');
   let d; try { d = JSON.parse(txt); } catch (e1) {
@@ -389,10 +417,16 @@ function lerJsonQuestoes(txt) {
   if (Array.isArray(d.questoes)) d = d.questoes; else if (!Array.isArray(d) && (d.enunciado || d.pergunta)) d = [d];
   return { itens: Array.isArray(d) ? d : Object.values(d) };
 }
-function normalizarQuestao(q, nivelPadrao) {
+function normalizarQuestao(q, nivelPadrao = '') {
   if (!q || typeof q !== 'object') return { erro: 'item não é um objeto' };
   const enun = String(q.enunciado ?? q.pergunta ?? q.questao ?? '').trim(); if (!enun) return { erro: 'sem enunciado' };
-  const ops = q.opcoes ?? q.alternativas ?? q.options; if (!Array.isArray(ops)) return { erro: 'sem "opcoes"' };
+  let ops = q.opcoes ?? q.alternativas ?? q.options;
+  if (ops && typeof ops === 'object' && !Array.isArray(ops)) {
+    const entradas = Object.entries(ops).sort(([a], [b]) => a.toUpperCase().localeCompare(b.toUpperCase()));
+    if (!entradas.length || entradas.some(([letra, texto], i) => letra.toUpperCase() !== LETRAS[i] || typeof texto !== 'string' || !texto.trim())) return { erro: 'alternativas devem usar letras consecutivas de A a E e textos não vazios' };
+    ops = entradas.map(([, texto]) => texto);
+  }
+  if (!Array.isArray(ops)) return { erro: 'sem "opcoes" (use uma lista ou um objeto com letras de A a E)' };
   let t = ops.map((o) => String(typeof o === 'object' && o ? (o.texto ?? o.text ?? '') : o).trim()).filter(Boolean);
   if (t.length && t.every((o, i) => new RegExp('^\\(?' + LETRAS[i % 5] + '[\\)\\.\\-:]\\s+', 'i').test(o))) t = t.map((o) => o.replace(/^\(?[A-Ea-e][\)\.\-:]\s+/, ''));
   const n = t.length; if (n < 2 || n > 5) return { erro: `precisa ter de 2 a 5 alternativas (veio ${n})` };
@@ -401,13 +435,12 @@ function normalizarQuestao(q, nivelPadrao) {
   else if (typeof c === 'number' || (typeof c === 'string' && /^\d+$/.test(c.trim()))) idx = +c;
   else if (typeof c === 'string') { const k = t.map((x) => x.toLowerCase()).indexOf(c.trim().toLowerCase()); if (k >= 0) idx = k; }
   if (idx === null || idx < 0 || idx >= n) return { erro: 'resposta correta inválida (use "A" a "E")' };
-  const nv = slugify(q.nivel); let nivel = nivelPadrao;
-  for (const k in NIVEIS) if (nv.includes(k)) { nivel = k; break; }
-  return { q: { enunciado: enun, opcoes: t, correta: idx, nivel, explicacao: String(q.explicacao ?? q.comentario ?? '').trim() }, cat: String(q.cat ?? q.disciplina ?? q.materia ?? '').trim() };
+  const nivel = normalizarNivel(q.nivel ?? q.ensino ?? q.escolaridade ?? q.nivel_ensino ?? nivelPadrao);
+  return { q: { enunciado: enun, opcoes: t, correta: idx, nivel, explicacao: String(q.explicacao ?? q.comentario ?? q.justificativa ?? '').trim() }, cat: String(q.cat ?? q.disciplina ?? q.materia ?? '').trim() };
 }
-function adicionarQuestoes(itens, catForcada = '', nivelPadrao = 'medio') {
+function adicionarQuestoes(itens, catForcada = '', nivelPadrao = '') {
   const r = { add: 0, dup: 0, erros: [], criadas: {} }, todas = ler('questoes'), vistos = new Set();
-  todas.forEach((q) => vistos.add(normalizarCat(q.cat) + '|' + String(q.enunciado || '').trim().toLowerCase()));
+  todas.forEach((q) => vistos.add(normalizarCat(q.cat) + '|' + normalizarNivel(q.nivel) + '|' + String(q.enunciado || '').trim().toLowerCase()));
   itens.forEach((item, i) => {
     const n = normalizarQuestao(item, nivelPadrao); if (n.erro) return r.erros.push(`Questão ${i + 1}: ${n.erro}`);
     let cat = catForcada;
@@ -417,7 +450,7 @@ function adicionarQuestoes(itens, catForcada = '', nivelPadrao = 'medio') {
       if (cat === false) return r.erros.push(`Questão ${i + 1}: matéria inválida`);
       if (!existia) r.criadas[cat] = n.cat;
     }
-    const chave = cat + '|' + n.q.enunciado.toLowerCase(); if (vistos.has(chave)) return r.dup++;
+    const chave = cat + '|' + n.q.nivel + '|' + n.q.enunciado.toLowerCase(); if (vistos.has(chave)) return r.dup++;
     vistos.add(chave); todas.push(Object.assign({ id: proximoId(todas, 'q'), cat }, n.q)); r.add++;
   });
   return r;
@@ -432,11 +465,14 @@ function viewAdmin(ancora) {
   const materias = getMaterias(), cont = contarPorCat(), apostilas = ler('apostilas'), simulados = ler('simulados');
   const parametros = new URLSearchParams((location.hash.split('?')[1]) || '');
   const filtro = normalizarCat(parametros.get('cat') || '');
-  const questoes = ler('questoes').filter((q) => !filtro || normalizarCat(q.cat) === filtro);
+  const filtroNivel = parametros.get('nivel') || '';
+  const questoes = ler('questoes').filter((q) => (!filtro || normalizarCat(q.cat) === filtro) && doNivel(q, filtroNivel));
   const paginas = Math.max(1, Math.ceil(questoes.length / 30));
   const numeroPagina = Math.max(1, Math.min(paginas, parseInt(parametros.get('pagina'), 10) || 1));
-  const questoesPagina = questoes.slice().reverse().slice((numeroPagina - 1) * 30, numeroPagina * 30);
-  const linkPagina = (numero) => '#/admin/lista?cat=' + encodeURIComponent(filtro) + '&pagina=' + numero;
+  const ordemEnsino = niveisDisponiveis().map(([nivel]) => nivel);
+  const questoesOrdenadas = questoes.slice().reverse().sort((a, b) => ordemEnsino.indexOf(normalizarNivel(a.nivel) || 'sem_nivel') - ordemEnsino.indexOf(normalizarNivel(b.nivel) || 'sem_nivel'));
+  const questoesPagina = questoesOrdenadas.slice((numeroPagina - 1) * 30, numeroPagina * 30);
+  const linkPagina = (numero) => '#/admin/lista?cat=' + encodeURIComponent(filtro) + '&nivel=' + encodeURIComponent(filtroNivel) + '&pagina=' + numero;
   const fl = pegarFlash();
   const exemplo = '[\n  {\n    "cat": "Informática",\n    "nivel": "medio",\n    "enunciado": "Texto da pergunta...",\n    "opcoes": ["Alternativa A", "Alternativa B", "Alternativa C", "Alternativa D", "Alternativa E"],\n    "correta": "C",\n    "explicacao": "Por que a C está certa..."\n  }\n]';
   const chk = (n) => Object.entries(materias).map(([k, v]) => `<label class="chip"><input type="checkbox" name="${n}" value="${e(k)}"> ${e(v)} <small>${cont[k] || 0}</small></label>`).join('');
@@ -472,12 +508,12 @@ function viewAdmin(ancora) {
       <label>Explicação do gabarito <textarea name="explicacao" rows="3"></textarea></label><button class="btn" type="submit">Cadastrar questão</button></form></details>
 
   <details class="card secao" id="lote"><summary><h2>4. Adicionar várias questões de uma vez (JSON)</h2><span class="seta" aria-hidden="true"></span></summary>
-    <form data-f="questoes_lote"><div class="duas"><label>Matéria de destino ${selMateria('cat_lote', materias, '-- Usar o campo "cat" de cada questão --', false)}</label>
-      <label>Nível padrão (se a questão não tiver "nivel") <select name="nivel_lote">${opNiveis('medio', false)}</select></label></div>
+    <form data-f="questoes_lote"><label>Matéria de destino ${selMateria('cat_lote', materias, '-- Usar o campo "cat" de cada questão --', false)}</label>
       <small>Escolhendo uma matéria acima, <b>todas</b> as questões vão para ela. Sem escolher, cada questão usa o seu "cat" e a matéria é criada se ainda não existir.</small>
+      <p class="sub">O ensino é identificado pelo campo <b>nivel</b> de cada questão e aparece automaticamente nos filtros. Sem esse campo, a questão fica como “Não informado”.</p>
       <label>Cole a lista JSON <textarea name="json" rows="4" style="font-family:monospace" placeholder="${e(exemplo)}"></textarea></label>
       <label>…ou envie um arquivo .json <input type="file" name="arquivo" accept=".json,application/json"></label>
-      <small>Campos: <b>enunciado</b>, <b>opcoes</b> (2 a 5 textos), <b>correta</b> ("A" a "E"), explicacao, nivel, cat. Questões repetidas na mesma matéria são ignoradas.</small><br>
+      <small>Campos: <b>enunciado</b>, <b>opcoes</b> (2 a 5 textos), <b>correta</b> ("A" a "E"), explicacao, nivel, cat. Questões repetidas na mesma matéria e ensino são ignoradas.</small><br>
       <button class="btn" type="submit" style="margin-top:10px">Importar questões</button></form></details>
 
   <details class="card secao" id="apostilas"><summary><h2>5. Apostilas e resumos</h2><span class="seta" aria-hidden="true"></span></summary>
@@ -493,8 +529,9 @@ function viewAdmin(ancora) {
 
   <details class="card secao" id="lista" data-lembrar="lista">
     <summary><h2>6. Questões cadastradas (${questoes.length})</h2><span class="seta" aria-hidden="true"></span></summary>
-    <div class="linha-op"><select id="filtro-cat"><option value="">Todas as matérias</option>${Object.entries(materias).map(([k, v]) => `<option value="${e(k)}" ${k === filtro ? 'selected' : ''}>${e(v)} (${cont[k] || 0})</option>`).join('')}</select></div>
-    <div class="tabela"><table>${questoesPagina.map((q) => `<tr><td>${e(materias[normalizarCat(q.cat)] || q.cat || '')}<br><small>${e(NIVEIS[q.nivel] || '')}</small></td>
+    <div class="duas"><label>Filtrar por ensino <select id="filtro-nivel"><option value="">Todos os níveis</option>${niveisDisponiveis().map(([k,v,n]) => `<option value="${e(k)}" ${k === filtroNivel ? 'selected' : ''}>${e(v)} (${n})</option>`).join('')}</select></label>
+      <label>Filtrar por matéria <select id="filtro-cat"><option value="">Todas as matérias</option>${Object.entries(materias).map(([k, v]) => `<option value="${e(k)}" ${k === filtro ? 'selected' : ''}>${e(v)} (${cont[k] || 0})</option>`).join('')}</select></label></div>
+    <div class="tabela"><table>${questoesPagina.map((q) => `<tr><td>${e(materias[normalizarCat(q.cat)] || q.cat || '')}<br><small>${e(rotuloNivel(q.nivel))}</small></td>
       <td>${e((q.enunciado || '').length > 120 ? q.enunciado.slice(0, 120) + '…' : q.enunciado)}</td>
       <td class="acoes-td">${lapis('questao', q.id)}<button class="btn sec peq" data-del="questao" data-id="${e(q.id)}">Excluir</button></td></tr>`).join('')}</table></div>
     <nav class="paginacao" aria-label="Páginas de questões">${numeroPagina > 1 ? `<a class="btn sec peq" href="${e(linkPagina(numeroPagina - 1))}">Anterior</a>` : '<span></span>'}
@@ -507,7 +544,7 @@ function viewAdmin(ancora) {
     <label style="display:inline-block;margin-left:10px">Importar backup <input type="file" id="importar" accept=".json,application/json"></label>
     <p><button class="btn sec peq" id="restaurar">Restaurar dados originais</button></p></details>`);
 
-  const secao = document.getElementById(ancora || (filtro || parametros.has('pagina') ? 'lista' : ''));
+  const secao = document.getElementById(ancora || (filtro || filtroNivel || parametros.has('pagina') ? 'lista' : ''));
   if (secao) { secao.open = true; secao.scrollIntoView(); }
   const volta = (a, msg, ok = true) => { if (msg) flash(msg, ok); const alvo = '#/admin/' + a; if (location.hash === alvo) rota(); else location.hash = alvo; };
   document.getElementById('sair').onclick = async () => {
@@ -519,7 +556,9 @@ function viewAdmin(ancora) {
   };
   const publicar = document.getElementById('publicar');
   if (publicar) publicar.onclick = async () => { await salvarDB(); volta('', 'Conteúdo publicado no Supabase.'); };
-  document.getElementById('filtro-cat').onchange = (ev) => { location.hash = '#/admin?cat=' + encodeURIComponent(ev.target.value); };
+  const atualizarFiltros = () => { location.hash = '#/admin/lista?cat=' + encodeURIComponent(document.getElementById('filtro-cat').value) + '&nivel=' + encodeURIComponent(document.getElementById('filtro-nivel').value); };
+  document.getElementById('filtro-cat').onchange = atualizarFiltros;
+  document.getElementById('filtro-nivel').onchange = atualizarFiltros;
   const det = document.getElementById('lista'); try { if (!secao && localStorage.getItem('secao_lista') === 'fechada') det.open = false; } catch (er) {}
   det.addEventListener('toggle', () => { try { localStorage.setItem('secao_lista', det.open ? 'aberta' : 'fechada'); } catch (er) {} });
 
@@ -540,7 +579,7 @@ function viewAdmin(ancora) {
       return volta('materias', ja ? `A matéria "${nome}" já existia.` : `Matéria "${nome}" cadastrada.`);
     }
     if (a === 'novo_simulado') {
-      const nivel = NIVEIS[v('nivel')] ? v('nivel') : '', qtd = Math.max(0, Math.min(100, +v('qtd') || 0));
+      const nivel = getNiveis()[normalizarNivel(v('nivel'))] ? normalizarNivel(v('nivel')) : '', qtd = Math.max(0, Math.min(100, +v('qtd') || 0));
       if (!filtrarQuestoes(cats, nivel).length) return volta('simulados', 'Não há questões para essa combinação de matérias e nível. Cadastre questões antes.', false);
       ler('simulados').push({ id: proximoId(ler('simulados'), 's'), nome: v('nome').trim(), descricao: v('descricao').trim(), cats: cats.map(normalizarCat).filter(Boolean), nivel, qtd });
       await salvarDB(); return volta('simulados', `Simulado "${v('nome').trim()}" criado. Ele já aparece na página inicial.`);
@@ -565,7 +604,7 @@ function viewAdmin(ancora) {
       let texto = v('json'); const arq = f.elements.arquivo.files[0]; if (arq) texto = await arq.text();
       const L = lerJsonQuestoes(texto); if (L.erro) return volta('lote', L.erro + '\nDica: cole só o array [ ... ] e confira vírgulas e aspas.', false);
       if (!L.itens.length) return volta('lote', 'A lista está vazia.', false);
-      const catF = v('cat_lote') ? normalizarCat(v('cat_lote')) : '', r = adicionarQuestoes(L.itens, catF, NIVEIS[v('nivel_lote')] ? v('nivel_lote') : 'medio');
+      const catF = v('cat_lote') ? normalizarCat(v('cat_lote')) : '', r = adicionarQuestoes(L.itens, catF);
       if (r.add || Object.keys(r.criadas).length) await salvarDB();
       let msg = `Lidas: ${L.itens.length} · Adicionadas: ${r.add} · Duplicadas ignoradas: ${r.dup} · Com erro: ${r.erros.length}`;
       if (catF) msg += '\nMatéria de destino: ' + (getMaterias()[catF] || catF);
@@ -632,7 +671,7 @@ function viewEditar(tipo, id) {
       else if (lim.length < 2) erro = 'Preencha ao menos 2 alternativas.';
       else ler(chave)[idx] = { id, cat, nivel: v('nivel'), enunciado: v('enunciado').trim(), opcoes: lim, correta: novo, explicacao: v('explicacao').trim() };
     } else if (tipo === 'simulado') {
-      const cats = [...f.querySelectorAll('[name=cats]:checked')].map((i) => i.value), nivel = NIVEIS[v('nivel')] ? v('nivel') : '';
+      const cats = [...f.querySelectorAll('[name=cats]:checked')].map((i) => i.value), nivel = getNiveis()[normalizarNivel(v('nivel'))] ? normalizarNivel(v('nivel')) : '';
       if (!v('nome').trim()) erro = 'Dê um nome ao simulado.';
       else if (!filtrarQuestoes(cats, nivel).length) erro = 'Não há questões para essa combinação de matérias e nível.';
       else ler(chave)[idx] = { id, nome: v('nome').trim(), descricao: v('descricao').trim(), cats: cats.map(normalizarCat).filter(Boolean), nivel, qtd: Math.max(0, Math.min(100, +v('qtd') || 0)) };
